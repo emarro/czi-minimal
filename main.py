@@ -17,6 +17,7 @@ from composer.callbacks import (
     RuntimeEstimator,
     MemoryMonitor,
 )
+from composer.core import Evaluator
 from composer.loggers import WandBLogger
 from composer.models import HuggingFaceModel
 from composer.optim import DecoupledAdamW
@@ -25,11 +26,96 @@ from composer.utils import dist, reproducibility
 from datasets import load_dataset
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
+from torchmetrics import PearsonCorrCoef
 from transformers import DataCollatorForLanguageModeling
 from utils import load_config, setup_logging
 
 
 logger = logging.getLogger(__name__)
+
+
+class ComposerWrapper(HuggingFaceModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.val_pcc = PearsonCorrCoef()
+
+    def eval_forward(self, batch, outputs=None):
+        if outputs:
+            return outputs
+        inputs, _ = batch
+        outputs = self.model(inputs)
+        return outputs
+
+    def update_metric(self, batch, outputs, metric) -> None:
+        """
+        Update metric by returning as a socre the (log) ref/alt probabilities
+        Args:
+            batch: dict[str, Tensor] the input batch
+            outputs: Tensor(batch, seq_len, vocab_len), assumes outputs are probabilities
+            metric: torchmetrics.Metric the metric we're updating
+        """
+        ref_bp = batch["ref_id"]  # [batch_size]
+        ref_prob = torch.gather(outputs, dim=2, index=ref_bp)
+
+        alt_bp = batch["alt_id"]  # [batch_size]
+        alt_prob = torch.gather(outputs, dim=2, index=alt_bp)
+
+        assert len(outputs.shape) == 3, (
+            f"Expected outputs of shape [batch, seq_len, vocba_len], found {outputs.shape}"
+        )
+        assert (outputs < 0).sum() == 0, (
+            f"Found probabilities less than 0 in outputs: {outputs[outputs < 0]}"
+        )
+        assert (outputs > 1).sum() == 0, (
+            f"Found probabilities greater than 1 in outputs: {outputs[outputs < 1]}"
+        )
+        assert (outputs.sum(dim=-1) != 1).sum() == 0, (
+            f"Probabilities in outputs do not normalize to 1: {outputs[outputs.sum(dim=-1) != 1]}"
+        )
+
+        score = alt_prob / ref_prob
+        maf = batch["MAF"]  # the 'label' [batch_size]
+
+        metric.update(score, maf)
+
+    def get_metrics(self, is_train=False):
+        if is_train:
+            return super().get_metrics(is_train)
+        return {"PearsonCorrCoef": self.val_pcc}
+
+
+def example_zs_update_metric(self, batch, outputs, metric) -> None:
+    """
+    Update metric by returning as a socre the (log) ref/alt probabilities
+    Args:
+        batch: dict[str, Tensor] the input batch
+        outputs: Tensor(batch, seq_len, vocab_len), assumes outputs are probabilities
+        metric: torchmetrics.Metric the metric we're updating
+    """
+    tokenizer = self.tokenizer
+    ref_bp = tokenizer(batch["ref"])  # [batch_size]
+    ref_prob = torch.gather(outputs, dim=2, index=ref_bp)
+
+    alt_bp = tokenizer(batch["alt"])  # [batch_size]
+    alt_prob = torch.gather(outputs, dim=2, index=alt_bp)
+
+    assert len(outputs.shape) == 3, (
+        f"Expected outputs of shape [batch, seq_len, vocba_len], found {outputs.shape}"
+    )
+    assert (outputs < 0).sum() == 0, (
+        f"Found probabilities less than 0 in outputs: {outputs[outputs < 0]}"
+    )
+    assert (outputs > 1).sum() == 0, (
+        f"Found probabilities greater than 1 in outputs: {outputs[outputs < 1]}"
+    )
+    assert (outputs.sum(dim=-1) != 1).sum() == 0, (
+        f"Probabilities in outputs do not normalize to 1: {outputs[outputs.sum(dim=-1) != 1]}"
+    )
+
+    score = alt_prob / ref_prob
+    maf = batch["MAF"]  # the 'label' [batch_size]
+
+    metric.update(score, maf)
 
 
 def generate_dna_sequence(max_length: int, fixed_length: bool = True) -> str:
@@ -115,16 +201,29 @@ def build_model(cfg: DictConfig):
     logger.info(f"Tokenizer vocab: {tokenizer.get_vocab()}")
     logger.info("=========================\n")
 
-    return HuggingFaceModel(model, tokenizer)
+    # return HuggingFaceModel(model, tokenizer, eval_metrics=None)
+    return ComposerWrapper(model, tokenizer)
 
 
-def build_dataloader(cfg: DictConfig, tokenizer, batch_size: int, split: str = "train"):
+def build_dataloader(
+    cfg: DictConfig,
+    tokenizer,
+    batch_size: int,
+    split: str = "train",
+    eval_only: bool = False,
+):
     """Build data loader for masked language modeling."""
 
     # Load dataset
     dataset_name_or_path = (
         cfg.data_local if cfg.data_local is not None else cfg.data_remote
     )
+    mask_seq = False
+    if eval_only:
+        dataset_name_or_path = cfg.eval_remote
+        # split naming error
+        split = "train"
+        mask_seq = True
     dataset = load_dataset(
         dataset_name_or_path,
         # data_files={split: os.path.join(cfg.data_local, f"{split}.txt")},
@@ -132,12 +231,23 @@ def build_dataloader(cfg: DictConfig, tokenizer, batch_size: int, split: str = "
     )
 
     class TokenizedDataset(Dataset):
-        def __init__(self, dataset, tokenizer, max_length, repeat_weight=0.1):
+        def __init__(
+            self, dataset, tokenizer, max_length, repeat_weight=0.1, mask_seq=False
+        ):
+            """
+            Datasets that wraps tokenization
+            dataset: HF dataset
+            tokenizer: HF tokenizer
+            max_length: int max length of seq (will truncate)
+            repeat_weight: float the value for which to downweight repetitive (soft-masked) portions of a seq
+            mask_seq: bool Whether to mask sequences at middle token (if ref and alt are in dataset)
+            """
             self.dataset = dataset
             self.tokenizer = tokenizer
             self.max_length = max_length
             self.seq_idx = "seq"
             self.repeat_weight = repeat_weight
+            self.mask_seq = mask_seq
 
             logger.info("\n=== Dataset Information ===")
             logger.info(f"Dataset size: {len(dataset)}")
@@ -155,14 +265,29 @@ def build_dataloader(cfg: DictConfig, tokenizer, batch_size: int, split: str = "
 
         def __getitem__(self, idx):
             item = self.dataset[idx]
+            sequence = item[self.seq_idx]
+            ref_id, alt_id = None, None
+            if self.mask_seq and "alt" in self.dataset and "ref" in self.dataset:
+                var_idx = len(sequence) // 2
+                seq_bp = sequence[var_idx]
+                assert item["ref"] == seq_bp, (
+                    f"Masing in eval dataloader failed, found {seq_bp} when we expected {item['ref']}"
+                )
+                sequence[var_idx] = self.tokenizer.mask
+                ref_id = tokenizer(item["ref"], return_tensors="pt")
+                alt_id = tokenizer(item["alt"], return_tensors="pt")
+
             encoding = self.tokenizer(
-                item[self.seq_idx],
+                sequence,
                 padding="max_length",
                 truncation=True,
                 max_length=self.max_length,
                 return_tensors="pt",
                 add_special_tokens=True,
             )
+            if ref_id is not None:
+                encoding["ref_id"] = ref_id
+                encoding["alt_id"] = alt_id
             is_lowercase = torch.tensor(
                 [x.islower() for x in item[self.seq_idx]],
                 device=encoding["input_ids"].device,
@@ -214,11 +339,12 @@ def build_dataloader(cfg: DictConfig, tokenizer, batch_size: int, split: str = "
             return encoding
 
     tokenized_dataset = TokenizedDataset(
-        dataset, tokenizer, cfg.max_seq_len, cfg.repeat_weight
+        dataset, tokenizer, cfg.max_seq_len, cfg.repeat_weight, mask_seq=mask_seq
     )
     sampler = dist.get_sampler(tokenized_dataset, shuffle=(split == "train"))
     collate_fn = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer, mlm_probability=cfg.mlm_probability
+        tokenizer=tokenizer,
+        mlm_probability=cfg.mlm_probability if not mask_seq else 0.0,
     )
 
     return DataLoader(
@@ -302,13 +428,29 @@ def run_training(config_path: str = "config.yaml"):
             cfg.global_train_batch_size // dist.get_world_size(),
             split="validation",
         )
+    val_loader = Evaluator(label="eval_split", dataloader=val_loader)
+    eval_dataloaders = [val_loader]
+    if cfg.eval_remote is not None:
+        zeroshot_val_loader = build_dataloader(
+            cfg,
+            model.tokenizer,
+            cfg.global_train_batch_size // dist.get_world_size(),
+            split="validation",
+            eval_only=True,
+        )
+        zeroshot_val_loader = Evaluator(
+            label="maize_allele_freq",
+            dataloader=zeroshot_val_loader,
+            metric_names=["PearsonCorrCoef"],
+        )
+        eval_dataloaders = [val_loader, zeroshot_val_loader]
 
     # Create trainer; see
     # https://docs.mosaicml.com/projects/composer/en/latest/api_reference/generated/composer.Trainer.html
     trainer = Trainer(
         model=model,
         train_dataloader=train_loader,
-        eval_dataloader=val_loader,
+        eval_dataloader=eval_dataloaders,
         optimizers=optimizer,
         schedulers=scheduler,
         max_duration=cfg.max_duration,

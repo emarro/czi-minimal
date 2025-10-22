@@ -1,8 +1,9 @@
 # Data configuration
 data_local: #./data
 data_remote: "kuleshov-group/Angiosperm_16_genomes"
+eval_remote: "emarro/maize-allele-frequency-20k-val"
 max_seq_len: 512
-run_name: "small_pcad1_full_integration_test"
+run_name: "tiny_pcad1_full_eval_integration_test"
 mlm_probability: 0.15
 repeat_weight: 0.10
 
@@ -18,7 +19,7 @@ data_generation:
 model:
   model_config:
     d_model: 128
-    n_layer: 8
+    n_layer: 1 #8
     # The pretrained caduceus models use the native `CaduceusTokenizer` which
     # has a vocab size of 12 tokens and must be padded to a multiple of
     # `pad_vocab_size_multiple`; see:
@@ -32,12 +33,12 @@ model:
     # https://github.com/kuleshov-group/caduceus/blob/2593c807ebfc0aede05e7a991474b1a0e60fdc93/caduceus/modeling_caduceus.py#L477-L482
     # This can be confusing because all tokenizers used with Caduceus (at TOW) also have a pad token with an index that is not -100,
     # e.g. `CaduceusTokenizer` has a pad token with index 1 and the songlab/tokenizer-dna-mlm tokenizer uses 0.
-    pad_token_id: -100  # [PAD] token ID
+    # pad_token_id: -100  # [PAD] token ID
 
 # Training configuration
 seed: 42
 max_duration: "5ep" #"500ba"  # Train for 500 batches
-eval_interval: "5000ba"  # Evaluate every 100 batches
+eval_interval: "5ba"  # Evaluate every 100 batches
 global_train_batch_size: 256
 
 # Use a fixed microbatch size to avoid this warning, which does become an error
@@ -83,7 +84,7 @@ save_num_checkpoints_to_keep: 1
 #   (Optional) W&B logging
 loggers:
   wandb:
-    project: "Composer Test"
+    project: "Composer Eval Test"
     entity: "emarro"
 
 
