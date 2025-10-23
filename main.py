@@ -27,6 +27,7 @@ from datasets import load_dataset
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
 from torchmetrics import PearsonCorrCoef
+from torchmetrics.aggregation import MeanMetric
 from transformers import DataCollatorForLanguageModeling
 
 
@@ -37,50 +38,62 @@ class ComposerWrapper(HuggingFaceModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.val_pcc = PearsonCorrCoef()
+        self.val_loss = MeanMetric()
 
     def eval_forward(self, batch, outputs=None):
         if outputs:
             return outputs
-        inputs, _ = batch
-        outputs = self.model(inputs)
+        outputs = self.model(**batch)
         return outputs
 
     def update_metric(self, batch, outputs, metric) -> None:
         """
         Update metric by returning as a socre the (log) ref/alt probabilities
         Args:
-            batch: dict[str, Tensor] the input batch
-            outputs: Tensor(batch, seq_len, vocab_len), assumes outputs are probabilities
+            batch: dict[str, Tensor] the input batch.
+            outputs: MaskedLMOutput['logits': Tensor(batch, seq_len, vocab_len), 'loss': float]
             metric: torchmetrics.Metric the metric we're updating
         """
+        if (
+            len(batch.keys()) == 5 or "ref_id" not in batch
+        ):  # not in the zero-shot eval task
+            metric.update(value=outputs.loss)
+            return
+        probs = outputs.logits.softmax(dim=-1)
+        batch_size, seq_len, vocab_len = outputs.shape
+
         ref_bp = batch["ref_id"]  # [batch_size]
-        ref_prob = torch.gather(outputs, dim=2, index=ref_bp)
+        ref_prob = torch.gather(
+            probs[:, (seq_len // 2) - 1, :], dim=1, index=ref_bp.unsqueeze(1)
+        ).squeeze(1)
 
         alt_bp = batch["alt_id"]  # [batch_size]
-        alt_prob = torch.gather(outputs, dim=2, index=alt_bp)
+        alt_prob = torch.gather(
+            probs[:, (seq_len // 2) - 1, :], dim=1, index=alt_bp.unsqueeze(1)
+        ).squeeze(1)
 
-        assert len(outputs.shape) == 3, (
-            f"Expected outputs of shape [batch, seq_len, vocba_len], found {outputs.shape}"
+        assert len(probs.shape) == 3, (
+            f"Expected probs of shape [batch, seq_len, vocba_len], found {probs.shape}"
         )
-        assert (outputs < 0).sum() == 0, (
-            f"Found probabilities less than 0 in outputs: {outputs[outputs < 0]}"
+        assert (probs < 0).sum() == 0, (
+            f"Found probabilities less than 0 in probs: {probs[probs < 0]}"
         )
-        assert (outputs > 1).sum() == 0, (
-            f"Found probabilities greater than 1 in outputs: {outputs[outputs < 1]}"
+        assert (probs > 1).sum() == 0, (
+            f"Found probabilities greater than 1 in probs: {probs[probs > 1]}"
         )
-        assert (outputs.sum(dim=-1) != 1).sum() == 0, (
-            f"Probabilities in outputs do not normalize to 1: {outputs[outputs.sum(dim=-1) != 1]}"
+        assert ((torch.abs(probs.sum(dim=-1)) - 1) > 1e-5).sum() == 0, (
+            f"Probabilities in probs do not normalize to 1: {probs[(torch.abs(probs.sum(dim=-1)) - 1) > 1e-5]}"
         )
 
-        score = alt_prob / ref_prob
+        score = torch.log(alt_prob / ref_prob)
         maf = batch["MAF"]  # the 'label' [batch_size]
 
-        metric.update(score, maf)
+        metric.update(preds=score, target=maf)
 
     def get_metrics(self, is_train=False):
         if is_train:
             return super().get_metrics(is_train)
-        return {"PearsonCorrCoef": self.val_pcc}
+        return {"PearsonCorrCoef": self.val_pcc, "MeanMetric": self.val_loss}
 
 
 def build_model(cfg: DictConfig):
@@ -200,6 +213,10 @@ def build_dataloader(
             if ref_id is not None:
                 encoding["ref_id"] = ref_id
                 encoding["alt_id"] = alt_id
+                for k, v in item.items():
+                    if type(v) is not str:
+                        encoding[k] = torch.tensor(v)
+
             is_lowercase = torch.tensor(
                 [x.islower() for x in item[self.seq_idx]],
                 device=encoding["input_ids"].device,
@@ -340,7 +357,9 @@ def run_training(config_path: str = "config.yaml"):
             cfg.global_train_batch_size // dist.get_world_size(),
             split="validation",
         )
-    val_loader = Evaluator(label="eval_split", dataloader=val_loader)
+    val_loader = Evaluator(
+        label="eval_split", dataloader=val_loader, metric_names=["MeanMetric"]
+    )
     eval_dataloaders = [val_loader]
     if cfg.eval_remote is not None:
         zeroshot_val_loader = build_dataloader(
