@@ -17,6 +17,7 @@ from composer.callbacks import (
     RuntimeEstimator,
     MemoryMonitor,
 )
+from composer.core import Evaluator
 from composer.loggers import WandBLogger
 from composer.models import HuggingFaceModel
 from composer.optim import DecoupledAdamW
@@ -25,81 +26,104 @@ from composer.utils import dist, reproducibility
 from datasets import load_dataset
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
-from transformers import DataCollatorForLanguageModeling
-from utils import load_config, setup_logging
+from torchmetrics import PearsonCorrCoef
+from torchmetrics.aggregation import MeanMetric
+from transformers import (
+    DataCollatorForLanguageModeling,
+    AutoConfig,
+    AutoModelForMaskedLM,
+    AutoTokenizer,
+)
 
 
 logger = logging.getLogger(__name__)
 
 
-def generate_dna_sequence(max_length: int, fixed_length: bool = True) -> str:
-    """Generate a random DNA sequence of specified or random length.
+class ComposerWrapper(HuggingFaceModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.val_pcc = PearsonCorrCoef()
+        self.val_loss = MeanMetric()
 
-    Args:
-        max_length: Maximum length of DNA sequence to generate
-        fixed_length: If True, generate sequence of exactly max_length.
-                     If False, generate sequence of random length up to max_length.
+    def eval_forward(self, batch, outputs=None):
+        if outputs:
+            return outputs
+        outputs = self.model(**batch)
+        return outputs
 
-    Returns:
-        A string of random DNA bases (A, C, G, T)
-    """
-    if fixed_length:
-        length = max_length
-    else:
-        length = random.randint(1, max_length)
-    return "".join(random.choice("ACGT") for _ in range(length))
+    def update_metric(self, batch, outputs, metric) -> None:
+        """
+        Update metric by returning as a socre the (log) ref/alt probabilities
+        Args:
+            batch: dict[str, Tensor] the input batch.
+            outputs: MaskedLMOutput['logits': Tensor(batch, seq_len, vocab_len), 'loss': float]
+            metric: torchmetrics.Metric the metric we're updating
+        """
+        if (
+            len(batch.keys()) == 5 or "ref_id" not in batch
+        ):  # not in the zero-shot eval task
+            metric.update(value=outputs.loss)
+            return
+        probs = outputs.logits.softmax(dim=-1)
+        batch_size, seq_len, vocab_len = outputs.shape
 
+        ref_bp = batch["ref_id"]  # [batch_size]
+        ref_prob = torch.gather(
+            probs[:, (seq_len // 2) - 1, :], dim=1, index=ref_bp.unsqueeze(1)
+        ).squeeze(1)
 
-def create_training_dataset(config_path: str = "config.yaml") -> None:
-    """Create a dataset of random DNA sequences using parameters from config.yaml."""
+        alt_bp = batch["alt_id"]  # [batch_size]
+        alt_prob = torch.gather(
+            probs[:, (seq_len // 2) - 1, :], dim=1, index=alt_bp.unsqueeze(1)
+        ).squeeze(1)
 
-    # Load config
-    config = load_config(config_path)
-    data_gen_config = config.data_generation
+        assert len(probs.shape) == 3, (
+            f"Expected probs of shape [batch, seq_len, vocba_len], found {probs.shape}"
+        )
+        assert (probs < 0).sum() == 0, (
+            f"Found probabilities less than 0 in probs: {probs[probs < 0]}"
+        )
+        assert (probs > 1).sum() == 0, (
+            f"Found probabilities greater than 1 in probs: {probs[probs > 1]}"
+        )
+        assert ((torch.abs(probs.sum(dim=-1)) - 1) > 1e-5).sum() == 0, (
+            f"Probabilities in probs do not normalize to 1: {probs[(torch.abs(probs.sum(dim=-1)) - 1) > 1e-5]}"
+        )
 
-    # Extract parameters from config
-    output_dir = data_gen_config.output_dir
-    num_sequences = data_gen_config.num_sequences
-    max_seq_length = data_gen_config.max_seq_length
-    fixed_length = data_gen_config.fixed_length
-    train_split = data_gen_config.train_split
+        score = torch.log(alt_prob / ref_prob)
+        maf = batch["MAF"]  # the 'label' [batch_size]
 
-    # Create output directory
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
+        metric.update(preds=score, target=maf)
 
-    # Calculate split sizes
-    num_train = int(num_sequences * train_split)
-    num_val = num_sequences - num_train
-
-    # Generate and save training data
-    logger.info(f"Generating {num_train} training sequences...")
-    with open(output_path / "train.txt", "w") as f:
-        for _ in range(num_train):
-            sequence = generate_dna_sequence(max_seq_length, fixed_length)
-            f.write(sequence + "\n")
-
-    # Generate and save validation data
-    logger.info(f"Generating {num_val} validation sequences...")
-    with open(output_path / "val.txt", "w") as f:
-        for _ in range(num_val):
-            sequence = generate_dna_sequence(max_seq_length, fixed_length)
-            f.write(sequence + "\n")
-
-    logger.info(f"Dataset created in {output_path}")
-    logger.info(f"Training sequences: {num_train}")
-    logger.info(f"Validation sequences: {num_val}")
-    logger.info(
-        f"{'Fixed' if fixed_length else 'Variable'} sequence length{'s' if not fixed_length else ''} up to {max_seq_length}"
-    )
+    def get_metrics(self, is_train=False):
+        if is_train:
+            return super().get_metrics(is_train)
+        return {"PearsonCorrCoef": self.val_pcc, "MeanMetric": self.val_loss}
 
 
 def build_model(cfg: DictConfig):
     """Build Caduceus model from config."""
     model_config = cfg.model.get("model_config", {})
-    model_config = CaduceusConfig(**model_config)
-    model = CaduceusForMaskedLM(model_config)
-    tokenizer = CaduceusTokenizer(model_max_length=cfg.max_seq_len)
+    if cfg.from_pretrained:
+        model_config = AutoConfig.from_pretrained(
+            cfg.pretrained_name_or_path, trust_remote_code=True
+        )
+        tokenizer = AutoTokenizer.from_pretrained(
+            cfg.pretrained_name_or_path, trust_remote_code=True
+        )
+        tokenizer.characters = "atcg"
+        if cfg.from_scratch:
+            model = AutoModelForMaskedLM.from_config(
+                model_config, trust_remote_code=True
+            )
+        else:
+            model = AutoModelForMaskedLM.from_pretrained(
+                cfg.pretrained_name_or_path, trust_remote_code=True
+            )
+    else:
+        model_config = CaduceusConfig(**model_config)
+        model = CaduceusForMaskedLM(model_config)
+        tokenizer = CaduceusTokenizer(model_max_length=cfg.max_seq_len)
 
     # Debug info
     logger.info("\n=== Model Configuration ===")
@@ -115,16 +139,29 @@ def build_model(cfg: DictConfig):
     logger.info(f"Tokenizer vocab: {tokenizer.get_vocab()}")
     logger.info("=========================\n")
 
-    return HuggingFaceModel(model, tokenizer)
+    # return HuggingFaceModel(model, tokenizer, eval_metrics=None)
+    return ComposerWrapper(model, tokenizer)
 
 
-def build_dataloader(cfg: DictConfig, tokenizer, batch_size: int, split: str = "train"):
+def build_dataloader(
+    cfg: DictConfig,
+    tokenizer,
+    batch_size: int,
+    split: str = "train",
+    eval_only: bool = False,
+):
     """Build data loader for masked language modeling."""
 
     # Load dataset
     dataset_name_or_path = (
         cfg.data_local if cfg.data_local is not None else cfg.data_remote
     )
+    mask_seq = False
+    if eval_only:
+        dataset_name_or_path = cfg.eval_remote
+        # split naming error
+        split = "train"
+        mask_seq = True
     dataset = load_dataset(
         dataset_name_or_path,
         # data_files={split: os.path.join(cfg.data_local, f"{split}.txt")},
@@ -132,12 +169,23 @@ def build_dataloader(cfg: DictConfig, tokenizer, batch_size: int, split: str = "
     )
 
     class TokenizedDataset(Dataset):
-        def __init__(self, dataset, tokenizer, max_length, repeat_weight=0.1):
+        def __init__(
+            self, dataset, tokenizer, max_length, repeat_weight=0.1, mask_seq=False
+        ):
+            """
+            Datasets that wraps tokenization
+            dataset: HF dataset
+            tokenizer: HF tokenizer
+            max_length: int max length of seq (will truncate)
+            repeat_weight: float the value for which to downweight repetitive (soft-masked) portions of a seq
+            mask_seq: bool Whether to mask sequences at middle token (if ref and alt are in dataset)
+            """
             self.dataset = dataset
             self.tokenizer = tokenizer
             self.max_length = max_length
             self.seq_idx = "seq"
             self.repeat_weight = repeat_weight
+            self.mask_seq = mask_seq
 
             logger.info("\n=== Dataset Information ===")
             logger.info(f"Dataset size: {len(dataset)}")
@@ -148,6 +196,7 @@ def build_dataloader(cfg: DictConfig, tokenizer, batch_size: int, split: str = "
             logger.info("\n=== Example Sequences ===")
             for i in range(min(3, len(dataset))):
                 logger.info(f"Example {i} text: {dataset[i][self.seq_idx][:50]}...")
+                logger.info(f"Example {i} ds: {self[i]}")
             logger.info("========================\n")
 
         def __len__(self):
@@ -155,14 +204,41 @@ def build_dataloader(cfg: DictConfig, tokenizer, batch_size: int, split: str = "
 
         def __getitem__(self, idx):
             item = self.dataset[idx]
+            sequence = item[self.seq_idx]
+            ref_id, alt_id = None, None
+            var_idx = None
+            if self.mask_seq:
+                var_idx = (len(sequence) // 2) - 1
+                seq_bp = sequence[var_idx]
+                assert item["ref"] == seq_bp, (
+                    f"Masking in eval dataloader failed, found {seq_bp} when we expected {item['ref']} around {sequence[var_idx - 5 : var_idx + 5]}"
+                )
+                # sequence[var_idx] = int(
+                #    self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
+                # )
+                sequence = (
+                    sequence[:var_idx]
+                    + self.tokenizer.mask_token
+                    + sequence[var_idx + 1 :]
+                )
+                ref_id = tokenizer(item["ref"], return_tensors="pt")["input_ids"][:, 0]
+                alt_id = tokenizer(item["alt"], return_tensors="pt")["input_ids"][:, 0]
+
             encoding = self.tokenizer(
-                item[self.seq_idx],
+                sequence,
                 padding="max_length",
                 truncation=True,
-                max_length=self.max_length,
+                max_length=self.max_length + 1,
                 return_tensors="pt",
                 add_special_tokens=True,
             )
+            if ref_id is not None:
+                encoding["ref_id"] = ref_id
+                encoding["alt_id"] = alt_id
+                for k, v in item.items():
+                    if type(v) is not str:
+                        encoding[k] = torch.tensor(v)
+
             is_lowercase = torch.tensor(
                 [x.islower() for x in item[self.seq_idx]],
                 device=encoding["input_ids"].device,
@@ -191,7 +267,7 @@ def build_dataloader(cfg: DictConfig, tokenizer, batch_size: int, split: str = "
             ] = -100  # Mask out everything that's not a DNA token
 
             # Print detailed info for first few batches
-            if idx < 3:
+            if idx < 0:
                 logger.info(f"\n=== Example {idx} Details ===")
                 logger.info(f"Raw text length: {len(item[self.seq_idx])}")
                 logger.info(f"Raw text: {item[self.seq_idx][:50]}...")
@@ -208,17 +284,20 @@ def build_dataloader(cfg: DictConfig, tokenizer, batch_size: int, split: str = "
             encoding["labels"] = labels
             repeat_loss = self.repeat_weight
             # Repeat regions are reweighted to repeat_loss. 1 otherwise.
-            loss_weights = is_lowercase * (1 - repeat_loss) + 1
+            loss_weights = (is_lowercase * (repeat_loss - 1)) + 1
             encoding["loss_weights"] = loss_weights
 
             return encoding
 
     tokenized_dataset = TokenizedDataset(
-        dataset, tokenizer, cfg.max_seq_len, cfg.repeat_weight
+        dataset, tokenizer, cfg.max_seq_len, cfg.repeat_weight, mask_seq=mask_seq
     )
     sampler = dist.get_sampler(tokenized_dataset, shuffle=(split == "train"))
     collate_fn = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer, mlm_probability=cfg.mlm_probability
+        tokenizer=tokenizer,
+        mlm_probability=cfg.mlm_probability if not mask_seq else 0.0,
+        mask_replace_prob=cfg.mask_replace_prob,
+        random_replace_prob=cfg.random_replace_prob,
     )
 
     return DataLoader(
@@ -302,13 +381,31 @@ def run_training(config_path: str = "config.yaml"):
             cfg.global_train_batch_size // dist.get_world_size(),
             split="validation",
         )
+    val_loader = Evaluator(
+        label="eval_split", dataloader=val_loader, metric_names=["MeanMetric"]
+    )
+    eval_dataloaders = [val_loader]
+    if cfg.eval_remote is not None:
+        zeroshot_val_loader = build_dataloader(
+            cfg,
+            model.tokenizer,
+            cfg.global_train_batch_size // dist.get_world_size(),
+            split="validation",
+            eval_only=True,
+        )
+        zeroshot_val_loader = Evaluator(
+            label="maize_allele_freq",
+            dataloader=zeroshot_val_loader,
+            metric_names=["PearsonCorrCoef"],
+        )
+        eval_dataloaders = [val_loader, zeroshot_val_loader]
 
     # Create trainer; see
     # https://docs.mosaicml.com/projects/composer/en/latest/api_reference/generated/composer.Trainer.html
     trainer = Trainer(
         model=model,
         train_dataloader=train_loader,
-        eval_dataloader=val_loader,
+        eval_dataloader=eval_dataloaders,
         optimizers=optimizer,
         schedulers=scheduler,
         max_duration=cfg.max_duration,
@@ -328,10 +425,8 @@ def run_training(config_path: str = "config.yaml"):
 
 
 if __name__ == "__main__":
-    logger = setup_logging()
     fire.Fire(
         {
-            "create_training_dataset": create_training_dataset,
             "run_training": run_training,
         }
     )

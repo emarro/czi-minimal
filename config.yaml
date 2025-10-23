@@ -1,24 +1,25 @@
 # Data configuration
 data_local: #./data
 data_remote: "kuleshov-group/Angiosperm_16_genomes"
+eval_remote: "emarro/maize-allele-frequency-20k-val"
 max_seq_len: 512
-run_name: "small_pcad1_full_integration_test"
-mlm_probability: 0.15
-repeat_weight: 0.10
+run_name: "pcad1_from_scratch_${pretrained_name_or_path}"
+mlm_probability: 0.15 # prob of masking a given token in an input sequence
+mask_replace_prob: 0.80 # prob of replacing a masked token with [MASK]
+random_replace_prob: 0.10 #prob of replacing a masked token with another token in the vocab
 
-# Data generation configuration
-data_generation:
-  output_dir: ${data_local}
-  max_seq_length: ${max_seq_len}
-  fixed_length: true  # If false, generates sequences of random lengths up to max_seq_length
-  num_sequences: 1000
-  train_split: 0.9
+repeat_weight: 0.10 #downweight losses for soft-masked DNA regions
+
+from_pretrained: True
+from_scratch: True
+pretrained_name_or_path: "kuleshov-group/PlantCaduceus_l20"
 
 # Model configuration
 model:
+  pad_token_id: -100  # [PAD] token ID
   model_config:
     d_model: 128
-    n_layer: 8
+    n_layer: 1 #8
     # The pretrained caduceus models use the native `CaduceusTokenizer` which
     # has a vocab size of 12 tokens and must be padded to a multiple of
     # `pad_vocab_size_multiple`; see:
@@ -32,13 +33,12 @@ model:
     # https://github.com/kuleshov-group/caduceus/blob/2593c807ebfc0aede05e7a991474b1a0e60fdc93/caduceus/modeling_caduceus.py#L477-L482
     # This can be confusing because all tokenizers used with Caduceus (at TOW) also have a pad token with an index that is not -100,
     # e.g. `CaduceusTokenizer` has a pad token with index 1 and the songlab/tokenizer-dna-mlm tokenizer uses 0.
-    pad_token_id: -100  # [PAD] token ID
 
 # Training configuration
 seed: 42
-max_duration: "5ep" #"500ba"  # Train for 500 batches
-eval_interval: "5000ba"  # Evaluate every 100 batches
-global_train_batch_size: 256
+max_duration: "50ep" #"500ba"  # Train for 50 epochs
+eval_interval: "5000ba"  # Evaluate every 5k batches
+global_train_batch_size: 2048
 
 # Use a fixed microbatch size to avoid this warning, which does become an error
 # in the evironment configured for this project:
@@ -61,19 +61,19 @@ precision: "amp_bf16"
 
 # Optimizer configuration
 optimizer:
-  lr: 2.0e-3
+  lr: 2.0e-4
   betas: [0.9, 0.98]
   eps: 1.0e-6
   weight_decay: 1.0e-5
 
 # Learning rate scheduler
 scheduler:
-  t_warmup: "100ba"
+  t_warmup: "1000ba"
   alpha_f: 0.02
 
 # Data loading
 train_loader:
-  num_workers: 4
+  num_workers: 2
 
 # Checkpointing
 save_folder: "./checkpoints/${run_name}" # e.g. './{run_name}/ckpt' (local) or 's3://mybucket/mydir/{run_name}/ckpt' (remote)
@@ -81,10 +81,10 @@ save_interval: "5000ba"
 save_num_checkpoints_to_keep: 1
 
 #   (Optional) W&B logging
-loggers:
-  wandb:
-    project: "Composer Test"
-    entity: "emarro"
+#loggers:
+#  wandb:
+#    project: "Composer Eval Test"
+#    entity: "emarro"
 
 
 #   (Optional) Load from local filesystem or remote object store to
