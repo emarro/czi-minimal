@@ -296,6 +296,8 @@ def build_dataloader(
     collate_fn = DataCollatorForLanguageModeling(
         tokenizer=tokenizer,
         mlm_probability=cfg.mlm_probability if not mask_seq else 0.0,
+        mask_replace_prob=cfg.mask_replace_prob,
+        random_replace_prob=cfg.random_replace_prob,
     )
 
     return DataLoader(
