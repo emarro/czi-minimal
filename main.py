@@ -28,7 +28,6 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
 from torchmetrics import PearsonCorrCoef
 from transformers import DataCollatorForLanguageModeling
-from utils import load_config, setup_logging
 
 
 logger = logging.getLogger(__name__)
@@ -82,102 +81,6 @@ class ComposerWrapper(HuggingFaceModel):
         if is_train:
             return super().get_metrics(is_train)
         return {"PearsonCorrCoef": self.val_pcc}
-
-
-def example_zs_update_metric(self, batch, outputs, metric) -> None:
-    """
-    Update metric by returning as a socre the (log) ref/alt probabilities
-    Args:
-        batch: dict[str, Tensor] the input batch
-        outputs: Tensor(batch, seq_len, vocab_len), assumes outputs are probabilities
-        metric: torchmetrics.Metric the metric we're updating
-    """
-    tokenizer = self.tokenizer
-    ref_bp = tokenizer(batch["ref"])  # [batch_size]
-    ref_prob = torch.gather(outputs, dim=2, index=ref_bp)
-
-    alt_bp = tokenizer(batch["alt"])  # [batch_size]
-    alt_prob = torch.gather(outputs, dim=2, index=alt_bp)
-
-    assert len(outputs.shape) == 3, (
-        f"Expected outputs of shape [batch, seq_len, vocba_len], found {outputs.shape}"
-    )
-    assert (outputs < 0).sum() == 0, (
-        f"Found probabilities less than 0 in outputs: {outputs[outputs < 0]}"
-    )
-    assert (outputs > 1).sum() == 0, (
-        f"Found probabilities greater than 1 in outputs: {outputs[outputs < 1]}"
-    )
-    assert (outputs.sum(dim=-1) != 1).sum() == 0, (
-        f"Probabilities in outputs do not normalize to 1: {outputs[outputs.sum(dim=-1) != 1]}"
-    )
-
-    score = alt_prob / ref_prob
-    maf = batch["MAF"]  # the 'label' [batch_size]
-
-    metric.update(score, maf)
-
-
-def generate_dna_sequence(max_length: int, fixed_length: bool = True) -> str:
-    """Generate a random DNA sequence of specified or random length.
-
-    Args:
-        max_length: Maximum length of DNA sequence to generate
-        fixed_length: If True, generate sequence of exactly max_length.
-                     If False, generate sequence of random length up to max_length.
-
-    Returns:
-        A string of random DNA bases (A, C, G, T)
-    """
-    if fixed_length:
-        length = max_length
-    else:
-        length = random.randint(1, max_length)
-    return "".join(random.choice("ACGT") for _ in range(length))
-
-
-def create_training_dataset(config_path: str = "config.yaml") -> None:
-    """Create a dataset of random DNA sequences using parameters from config.yaml."""
-
-    # Load config
-    config = load_config(config_path)
-    data_gen_config = config.data_generation
-
-    # Extract parameters from config
-    output_dir = data_gen_config.output_dir
-    num_sequences = data_gen_config.num_sequences
-    max_seq_length = data_gen_config.max_seq_length
-    fixed_length = data_gen_config.fixed_length
-    train_split = data_gen_config.train_split
-
-    # Create output directory
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
-
-    # Calculate split sizes
-    num_train = int(num_sequences * train_split)
-    num_val = num_sequences - num_train
-
-    # Generate and save training data
-    logger.info(f"Generating {num_train} training sequences...")
-    with open(output_path / "train.txt", "w") as f:
-        for _ in range(num_train):
-            sequence = generate_dna_sequence(max_seq_length, fixed_length)
-            f.write(sequence + "\n")
-
-    # Generate and save validation data
-    logger.info(f"Generating {num_val} validation sequences...")
-    with open(output_path / "val.txt", "w") as f:
-        for _ in range(num_val):
-            sequence = generate_dna_sequence(max_seq_length, fixed_length)
-            f.write(sequence + "\n")
-
-    logger.info(f"Dataset created in {output_path}")
-    logger.info(f"Training sequences: {num_train}")
-    logger.info(f"Validation sequences: {num_val}")
-    logger.info(
-        f"{'Fixed' if fixed_length else 'Variable'} sequence length{'s' if not fixed_length else ''} up to {max_seq_length}"
-    )
 
 
 def build_model(cfg: DictConfig):
@@ -258,6 +161,7 @@ def build_dataloader(
             logger.info("\n=== Example Sequences ===")
             for i in range(min(3, len(dataset))):
                 logger.info(f"Example {i} text: {dataset[i][self.seq_idx][:50]}...")
+                logger.info(f"Example {i} ds: {self[i]}")
             logger.info("========================\n")
 
         def __len__(self):
@@ -267,21 +171,29 @@ def build_dataloader(
             item = self.dataset[idx]
             sequence = item[self.seq_idx]
             ref_id, alt_id = None, None
-            if self.mask_seq and "alt" in self.dataset and "ref" in self.dataset:
-                var_idx = len(sequence) // 2
+            var_idx = None
+            if self.mask_seq:
+                var_idx = (len(sequence) // 2) - 1
                 seq_bp = sequence[var_idx]
                 assert item["ref"] == seq_bp, (
-                    f"Masing in eval dataloader failed, found {seq_bp} when we expected {item['ref']}"
+                    f"Masking in eval dataloader failed, found {seq_bp} when we expected {item['ref']} around {sequence[var_idx - 5 : var_idx + 5]}"
                 )
-                sequence[var_idx] = self.tokenizer.mask
-                ref_id = tokenizer(item["ref"], return_tensors="pt")
-                alt_id = tokenizer(item["alt"], return_tensors="pt")
+                # sequence[var_idx] = int(
+                #    self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
+                # )
+                sequence = (
+                    sequence[:var_idx]
+                    + self.tokenizer.mask_token
+                    + sequence[var_idx + 1 :]
+                )
+                ref_id = tokenizer(item["ref"], return_tensors="pt")["input_ids"][:, 0]
+                alt_id = tokenizer(item["alt"], return_tensors="pt")["input_ids"][:, 0]
 
             encoding = self.tokenizer(
                 sequence,
                 padding="max_length",
                 truncation=True,
-                max_length=self.max_length,
+                max_length=self.max_length + 1,
                 return_tensors="pt",
                 add_special_tokens=True,
             )
@@ -316,7 +228,7 @@ def build_dataloader(
             ] = -100  # Mask out everything that's not a DNA token
 
             # Print detailed info for first few batches
-            if idx < 3:
+            if idx < 0:
                 logger.info(f"\n=== Example {idx} Details ===")
                 logger.info(f"Raw text length: {len(item[self.seq_idx])}")
                 logger.info(f"Raw text: {item[self.seq_idx][:50]}...")
@@ -333,7 +245,7 @@ def build_dataloader(
             encoding["labels"] = labels
             repeat_loss = self.repeat_weight
             # Repeat regions are reweighted to repeat_loss. 1 otherwise.
-            loss_weights = is_lowercase * (1 - repeat_loss) + 1
+            loss_weights = (is_lowercase * (repeat_loss - 1)) + 1
             encoding["loss_weights"] = loss_weights
 
             return encoding
@@ -470,10 +382,8 @@ def run_training(config_path: str = "config.yaml"):
 
 
 if __name__ == "__main__":
-    logger = setup_logging()
     fire.Fire(
         {
-            "create_training_dataset": create_training_dataset,
             "run_training": run_training,
         }
     )
