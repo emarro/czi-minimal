@@ -28,7 +28,12 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
 from torchmetrics import PearsonCorrCoef
 from torchmetrics.aggregation import MeanMetric
-from transformers import DataCollatorForLanguageModeling
+from transformers import (
+    DataCollatorForLanguageModeling,
+    AutoConfig,
+    AutoModelForMaskedLM,
+    AutoTokenizer,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -99,9 +104,26 @@ class ComposerWrapper(HuggingFaceModel):
 def build_model(cfg: DictConfig):
     """Build Caduceus model from config."""
     model_config = cfg.model.get("model_config", {})
-    model_config = CaduceusConfig(**model_config)
-    model = CaduceusForMaskedLM(model_config)
-    tokenizer = CaduceusTokenizer(model_max_length=cfg.max_seq_len)
+    if cfg.from_pretrained:
+        model_config = AutoConfig.from_pretrained(
+            cfg.pretrained_name_or_path, trust_remote_code=True
+        )
+        tokenizer = AutoTokenizer.from_pretrained(
+            cfg.pretrained_name_or_path, trust_remote_code=True
+        )
+        tokenizer.characters = "atcg"
+        if cfg.from_scratch:
+            model = AutoModelForMaskedLM.from_config(
+                model_config, trust_remote_code=True
+            )
+        else:
+            model = AutoModelForMaskedLM.from_pretrained(
+                cfg.pretrained_name_or_path, trust_remote_code=True
+            )
+    else:
+        model_config = CaduceusConfig(**model_config)
+        model = CaduceusForMaskedLM(model_config)
+        tokenizer = CaduceusTokenizer(model_max_length=cfg.max_seq_len)
 
     # Debug info
     logger.info("\n=== Model Configuration ===")
