@@ -26,7 +26,7 @@ model:
   arch_layout: ["m3t1", ["M15"], "m4"] #architecture for DNA from Table 7 with best PPL in HNet paper
 
   #values below are all placeholder
-  d_model: 128
+  d_model: [128, 128]
   d_intermediate: [0, 1024]
   vocab_size: 16
   ssm_cfg:
