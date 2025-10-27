@@ -130,10 +130,10 @@ def build_model(cfg: DictConfig):
             )
     else:
         if cfg.hnet_model:
-            model_config = cfg.model.get("model")
-            attn_cfg = AttnConfig(**model_config.get("attn_cfg"))
-            ssm_cfg = SSMConfig(**model_config.get("ssm_cfg"))
-            hnet_cfg = HNetConfig(**model_config, attn_cfg=attn_cfg, ssm_cfg=ssm_cfg)
+            model_config = cfg.get("model")
+            # attn_cfg = AttnConfig(**model_config.get("attn_cfg"))
+            # ssm_cfg = SSMConfig(**model_config.get("ssm_cfg"))
+            hnet_cfg = HNetConfig(**model_config)
             # Create model
             model = HNetForCausalLM(hnet_cfg, dtype=torch.bfloat16)
             tokenizer = ByteTokenizer()
