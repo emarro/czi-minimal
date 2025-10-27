@@ -35,6 +35,14 @@ from transformers import (
     AutoTokenizer,
 )
 
+from hnet.models.mixer_seq import HNetForCausalLM
+from hnet.models.config_hnet import (
+    AttnConfig,
+    SSMConfig,
+    HNetConfig,
+)
+from hnet.utils.tokenizers import ByteTokenizer
+
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +111,7 @@ class ComposerWrapper(HuggingFaceModel):
 
 def build_model(cfg: DictConfig):
     """Build Caduceus model from config."""
-    model_config = cfg.model.get("model_config", {})
+    # TODO: Redo this whole thing, switch to hydra for cfg mngmnt and create unified instiation
     if cfg.from_pretrained:
         model_config = AutoConfig.from_pretrained(
             cfg.pretrained_name_or_path, trust_remote_code=True
@@ -121,9 +129,19 @@ def build_model(cfg: DictConfig):
                 cfg.pretrained_name_or_path, trust_remote_code=True
             )
     else:
-        model_config = CaduceusConfig(**model_config)
-        model = CaduceusForMaskedLM(model_config)
-        tokenizer = CaduceusTokenizer(model_max_length=cfg.max_seq_len)
+        if cfg.hnet_model:
+            model_config = cfg.model.get("model")
+            attn_cfg = AttnConfig(**model_config.get("attn_cfg"))
+            ssm_cfg = SSMConfig(**model_config.get("ssm_cfg"))
+            hnet_cfg = HNetConfig(**model_config, attn_cfg=attn_cfg, ssm_cfg=ssm_cfg)
+            # Create model
+            model = HNetForCausalLM(hnet_cfg, dtype=torch.bfloat16)
+            tokenizer = ByteTokenizer()
+        else:
+            model_config = cfg.model.get("model_config", {})
+            model_config = CaduceusConfig(**model_config)
+            model = CaduceusForMaskedLM(model_config)
+            tokenizer = CaduceusTokenizer(model_max_length=cfg.max_seq_len)
 
     # Debug info
     logger.info("\n=== Model Configuration ===")
@@ -170,7 +188,13 @@ def build_dataloader(
 
     class TokenizedDataset(Dataset):
         def __init__(
-            self, dataset, tokenizer, max_length, repeat_weight=0.1, mask_seq=False
+            self,
+            dataset,
+            tokenizer,
+            max_length,
+            repeat_weight=0.1,
+            mask_seq=False,
+            default_target_ratio=None,
         ):
             """
             Datasets that wraps tokenization
@@ -179,6 +203,7 @@ def build_dataloader(
             max_length: int max length of seq (will truncate)
             repeat_weight: float the value for which to downweight repetitive (soft-masked) portions of a seq
             mask_seq: bool Whether to mask sequences at middle token (if ref and alt are in dataset)
+            default_target_ratio: The default target ratio used by HNet (N in their paper) (if any)
             """
             self.dataset = dataset
             self.tokenizer = tokenizer
@@ -186,6 +211,7 @@ def build_dataloader(
             self.seq_idx = "seq"
             self.repeat_weight = repeat_weight
             self.mask_seq = mask_seq
+            self.default_target_ratio = default_target_ratio
 
             logger.info("\n=== Dataset Information ===")
             logger.info(f"Dataset size: {len(dataset)}")
@@ -286,15 +312,23 @@ def build_dataloader(
             # Repeat regions are reweighted to repeat_loss. 1 otherwise.
             loss_weights = (is_lowercase * (repeat_loss - 1) + 1) + 1
             encoding["loss_weights"] = loss_weights
+            if self.default_target_ratio is not None:
+                encoding["target_ratio"] = torch.tensor(self.default_target_ratio)
 
             return encoding
 
     tokenized_dataset = TokenizedDataset(
-        dataset, tokenizer, cfg.max_seq_len, cfg.repeat_weight, mask_seq=mask_seq
+        dataset,
+        tokenizer,
+        cfg.max_seq_len,
+        cfg.repeat_weight,
+        mask_seq=mask_seq,
+        default_target_ratio=cfg.default_target_ratio,
     )
     sampler = dist.get_sampler(tokenized_dataset, shuffle=(split == "train"))
     collate_fn = DataCollatorForLanguageModeling(
         tokenizer=tokenizer,
+        mlm=cfg.mlm,
         mlm_probability=cfg.mlm_probability if not mask_seq else 0.0,
         mask_replace_prob=cfg.mask_replace_prob,
         random_replace_prob=cfg.random_replace_prob,
