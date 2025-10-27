@@ -136,7 +136,10 @@ def build_model(cfg: DictConfig):
             hnet_cfg = HNetConfig(**model_config)
             # Create model
             model = HNetForCausalLM(hnet_cfg, dtype=torch.bfloat16)
-            tokenizer = ByteTokenizer()
+            # Use existing tokenizer instead of byte tokenizer (dna is already in bytes)
+            # tokenizer = ByteTokenizer()
+            tokenizer = CaduceusTokenizer(model_max_length=cfg.max_seq_len)
+
         else:
             model_config = cfg.model.get("model_config", {})
             model_config = CaduceusConfig(**model_config)
