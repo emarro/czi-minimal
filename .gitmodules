@@ -1,0 +1,3 @@
+[submodule "hnet"]
+	path = hnet
+	url = git@github.com:emarro/hnet.git
