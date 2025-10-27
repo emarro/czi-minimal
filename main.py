@@ -228,7 +228,7 @@ def build_dataloader(
                 sequence,
                 padding="max_length",
                 truncation=True,
-                max_length=self.max_length + 1,
+                max_length=self.max_length,
                 return_tensors="pt",
                 add_special_tokens=True,
             )
@@ -284,7 +284,7 @@ def build_dataloader(
             encoding["labels"] = labels
             repeat_loss = self.repeat_weight
             # Repeat regions are reweighted to repeat_loss. 1 otherwise.
-            loss_weights = (is_lowercase * (repeat_loss - 1)) + 1
+            loss_weights = (is_lowercase * (repeat_loss - 1) + 1) + 1
             encoding["loss_weights"] = loss_weights
 
             return encoding
