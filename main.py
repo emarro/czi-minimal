@@ -313,7 +313,7 @@ def build_dataloader(
             encoding["labels"] = labels
             repeat_loss = self.repeat_weight
             # Repeat regions are reweighted to repeat_loss. 1 otherwise.
-            loss_weights = (is_lowercase * (repeat_loss - 1) + 1) + 1
+            loss_weights = (is_lowercase * (repeat_loss - 1) + 1
             encoding["loss_weights"] = loss_weights
             if self.default_target_ratio is not None:
                 encoding["target_ratio"] = torch.tensor(self.default_target_ratio)
