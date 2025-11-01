@@ -226,6 +226,7 @@ def build_model(cfg: DictConfig):
     else:
         if cfg.hnet_model:
             model_config = cfg.get("model")
+            model_config = OmegaConf.to_container(model_config, resolve=True)
             # attn_cfg = AttnConfig(**model_config.get("attn_cfg"))
             # ssm_cfg = SSMConfig(**model_config.get("ssm_cfg"))
             hnet_cfg = HNetConfig(**model_config)
@@ -249,6 +250,11 @@ def build_model(cfg: DictConfig):
     logger.info(
         f"Total number of trainable parameters: {sum([x.numel() for x in model.parameters() if x.requires_grad])}"
     )
+    print(f"Total number of parameters: {sum([x.numel() for x in model.parameters()])}")
+    print(
+        f"Total number of trainable parameters: {sum([x.numel() for x in model.parameters() if x.requires_grad])}"
+    )
+
     logger.info(f"Model config: {model_config}")
     logger.info(f"Tokenizer vocab size: {len(tokenizer.get_vocab())}")
     logger.info(f"Model vocab size: {model.config.vocab_size}")
@@ -256,7 +262,7 @@ def build_model(cfg: DictConfig):
     logger.info("=========================\n")
 
     # return HuggingFaceModel(model, tokenizer, eval_metrics=None)
-    return ComposerWrapper(model, tokenizer)
+    return ComposerWrapper(model, tokenizer, mlm=cfg.mlm)
 
 
 def build_dataloader(
