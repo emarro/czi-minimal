@@ -113,46 +113,95 @@ class ComposerWrapper(HuggingFaceModel):
             outputs: MaskedLMOutput['logits': Tensor(batch, seq_len, vocab_len), 'loss': float]
             metric: torchmetrics.Metric the metric we're updating
         """
+        # TODO: Redo by shoving all the evals for each split into a collection class?
         if (
             len(batch.keys()) == 5 or "ref_id" not in batch
         ):  # not in the zero-shot eval task
-            metric.update(value=outputs.loss)
+            val = None
+            if metric.tag == "ar":
+                val = outputs.ar_loss if not self.mlm else None
+            elif metric.tag == "ratio":
+                val = outputs.ratio_loss if not self.mlm else None
+            elif metric.tag == "acc":
+                B, L, V = outputs.logits.shape
+                preds = outputs.logits.softmax(dim=-1).argmax(dim=-1)
+                labels = batch["labels"]
+                if self.mlm:
+                    # if MLM only count
+                    preds[labels == -100] = 0
+                    labels[labels == -100] = 0
+                metric.update(preds.view(-1), labels.view(-1))
+                return
+            else:
+                val = outputs.loss
+            metric.update(value=val)
             return
         probs = outputs.logits.softmax(dim=-1)
         batch_size, seq_len, vocab_len = outputs.shape
 
-        ref_bp = batch["ref_id"]  # [batch_size]
-        ref_prob = torch.gather(
-            probs[:, (seq_len // 2) - 1, :], dim=1, index=ref_bp.unsqueeze(1)
-        ).squeeze(1)
+        if self.mlm:
+            ref_bp = batch["ref_id"]  # [batch_size]
+            ref_prob = torch.gather(
+                probs[:, (seq_len // 2) - 1, :], dim=1, index=ref_bp.unsqueeze(1)
+            ).squeeze(1)
 
-        alt_bp = batch["alt_id"]  # [batch_size]
-        alt_prob = torch.gather(
-            probs[:, (seq_len // 2) - 1, :], dim=1, index=alt_bp.unsqueeze(1)
-        ).squeeze(1)
+            alt_bp = batch["alt_id"]  # [batch_size]
+            alt_prob = torch.gather(
+                probs[:, (seq_len // 2) - 1, :], dim=1, index=alt_bp.unsqueeze(1)
+            ).squeeze(1)
 
-        assert len(probs.shape) == 3, (
-            f"Expected probs of shape [batch, seq_len, vocba_len], found {probs.shape}"
-        )
-        assert (probs < 0).sum() == 0, (
-            f"Found probabilities less than 0 in probs: {probs[probs < 0]}"
-        )
-        assert (probs > 1).sum() == 0, (
-            f"Found probabilities greater than 1 in probs: {probs[probs > 1]}"
-        )
-        assert ((torch.abs(probs.sum(dim=-1)) - 1) > 1e-5).sum() == 0, (
-            f"Probabilities in probs do not normalize to 1: {probs[(torch.abs(probs.sum(dim=-1)) - 1) > 1e-5]}"
-        )
+            assert len(probs.shape) == 3, (
+                f"Expected probs of shape [batch, seq_len, vocba_len], found {probs.shape}"
+            )
+            assert (probs < 0).sum() == 0, (
+                f"Found probabilities less than 0 in probs: {probs[probs < 0]}"
+            )
+            assert (probs > 1).sum() == 0, (
+                f"Found probabilities greater than 1 in probs: {probs[probs > 1]}"
+            )
+            assert ((torch.abs(probs.sum(dim=-1)) - 1) > 1e-5).sum() == 0, (
+                f"Probabilities in probs do not normalize to 1: {probs[(torch.abs(probs.sum(dim=-1)) - 1) > 1e-5]}"
+            )
+            score = torch.log(alt_prob / ref_prob)
+        else:
+            alt_probs = outputs.alt_probs.logits.softmax(dim=-1)
+            ref_bp = batch["ref_id"]  # [B]
+            alt_bp = batch["alt_id"]  # [B]
+            input_ids = batch["input_ids"]  # [B, L]
+            ref_log_probs = torch.log(
+                torch.gather(probs, dim=-1, index=input_ids.unsqueeze(-1)).squeeze(2)
+            )
+            alt_ids = input_ids.detach().clone()  # [B, L]
+            alt_ids[:, (seq_len // 2) - 1] = alt_bp
+            assert all(
+                input_ids[:, : (seq_len // 2) - 1] == alt_ids[:, : (seq_len // 2) - 1]
+            ), "Not all ids before the variant site match"
+            assert all(
+                input_ids[:, (seq_len // 2) + 1 :] == alt_ids[:, : (seq_len // 2) + 1 :]
+            ), "Not all ids after the variant site match"
+            assert all(
+                input_ids[:, (seq_len // 2) - 1] != alt_ids[:, (seq_len // 2) - 1]
+            ), "Some REF and ALT sequences have the same BP at the variant site"
 
-        score = torch.log(alt_prob / ref_prob)
+            alt_log_probs = torch.log(
+                torch.gather(alt_probs, dim=-1, index=alt_ids.unsqueeze(-1)).squeeze(2)
+            )
+            ref_pll = ref_log_probs.mean(dim=-1)
+            alt_pll = alt_log_probs.mean(dim=-1)
+            score = alt_pll - ref_pll
+
         maf = batch["MAF"]  # the 'label' [batch_size]
 
         metric.update(preds=score, target=maf)
 
     def get_metrics(self, is_train=False):
         if is_train:
-            return super().get_metrics(is_train)
-        return {"PearsonCorrCoef": self.val_pcc, "MeanMetric": self.val_loss}
+            return {
+                "ARLoss": self.train_ar_loss,
+                "RatioLoss": self.train_ratio_loss,
+                "Accuracy": self.train_acc,
+            }
+        return {"PearsonCorrCoef": self.val_pcc, "EvalLoss": self.val_loss}
 
 
 def build_model(cfg: DictConfig):
