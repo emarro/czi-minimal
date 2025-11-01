@@ -289,6 +289,13 @@ def build_dataloader(
         # data_files={split: os.path.join(cfg.data_local, f"{split}.txt")},
         split=split,
     )
+    # Filter sequences that remain with lots of "N"s
+    logger.info(f"Dataset length {len(dataset)}")
+    cutoff = 0.6
+    dataset = dataset.filter(
+        lambda batch: batch["seq"].count("N") < len(batch["seq"]) * cutoff
+    )
+    logger.info(f"Dataset length {len(dataset)}")
 
     class TokenizedDataset(Dataset):
         def __init__(
@@ -299,6 +306,7 @@ def build_dataloader(
             repeat_weight=0.1,
             mask_seq=False,
             default_target_ratio=None,
+            mlm=True,
         ):
             """
             Datasets that wraps tokenization
@@ -316,6 +324,7 @@ def build_dataloader(
             self.repeat_weight = repeat_weight
             self.mask_seq = mask_seq
             self.default_target_ratio = default_target_ratio
+            self.mlm = mlm
 
             logger.info("\n=== Dataset Information ===")
             logger.info(f"Dataset size: {len(dataset)}")
@@ -360,7 +369,7 @@ def build_dataloader(
                 truncation=True,
                 max_length=self.max_length,
                 return_tensors="pt",
-                add_special_tokens=True,
+                add_special_tokens=False,
             )
             if ref_id is not None:
                 encoding["ref_id"] = ref_id
@@ -381,20 +390,25 @@ def build_dataloader(
             encoding = {k: v.squeeze(0) for k, v in encoding.items()}
 
             # Create labels for masked language modeling
-            labels = encoding["input_ids"].clone()
+            labels = encoding["input_ids"].detach().clone()
 
-            # Get DNA token IDs directly from tokenizer's character set;
-            # see https://github.com/kuleshov-group/llmlib/issues/8 for more on
-            # why this is necessary and how it might be improved.
-            dna_token_ids = {
-                int(self.tokenizer.get_vocab()[c]) for c in self.tokenizer.characters
-            }
-            valid_dna_tokens = torch.tensor(
-                [int(token_id) in dna_token_ids for token_id in labels]
-            )
-            labels[
-                ~valid_dna_tokens
-            ] = -100  # Mask out everything that's not a DNA token
+            if self.mlm:
+                # Get DNA token IDs directly from tokenizer's character set;
+                # see https://github.com/kuleshov-group/llmlib/issues/8 for more on
+                # why this is necessary and how it might be improved.
+                dna_token_ids = {
+                    int(self.tokenizer.get_vocab()[c])
+                    for c in self.tokenizer.characters
+                }
+                valid_dna_tokens = torch.tensor(
+                    [int(token_id) in dna_token_ids for token_id in labels]
+                )
+                labels[
+                    ~valid_dna_tokens
+                ] = -100  # Mask out everything that's not a DNA token
+            else:
+                # We're in AR and need to shift inputs and labels ourselves
+                encoding["input_ids"] = encoding["input_ids"][:-1]
 
             # Print detailed info for first few batches
             if idx < 0:
@@ -411,11 +425,11 @@ def build_dataloader(
                 logger.info("========================\n")
 
             # Add labels to the encoding
-            encoding["labels"] = labels
+            encoding["labels"] = labels if self.mlm else labels[:-1]
             repeat_loss = self.repeat_weight
             # Repeat regions are reweighted to repeat_loss. 1 otherwise.
             loss_weights = (is_lowercase * (repeat_loss - 1)) + 1
-            encoding["loss_weights"] = loss_weights
+            encoding["loss_weights"] = loss_weights if self.mlm else loss_weights[:-1]
             if self.default_target_ratio is not None:
                 encoding["target_ratio"] = torch.tensor(self.default_target_ratio)
 
@@ -428,15 +442,20 @@ def build_dataloader(
         cfg.repeat_weight,
         mask_seq=mask_seq,
         default_target_ratio=cfg.default_target_ratio,
+        mlm=cfg.mlm,
     )
     sampler = dist.get_sampler(tokenized_dataset, shuffle=(split == "train"))
-    collate_fn = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer,
-        mlm=cfg.mlm,
-        mlm_probability=cfg.mlm_probability if not mask_seq else 0.0,
-        mask_replace_prob=cfg.mask_replace_prob,
-        random_replace_prob=cfg.random_replace_prob,
-    )
+    collate_fn = (
+        DataCollatorForLanguageModeling(
+            tokenizer=tokenizer,
+            mlm=cfg.mlm,
+            mlm_probability=cfg.mlm_probability if not mask_seq else 0.0,
+            mask_replace_prob=cfg.mask_replace_prob,
+            random_replace_prob=cfg.random_replace_prob,
+        )
+        if cfg.mlm
+        else None
+    )  # Collator overwrites the labels from __getitem__, disable if not mlm!
 
     return DataLoader(
         tokenized_dataset,
@@ -444,6 +463,7 @@ def build_dataloader(
         num_workers=cfg.train_loader.num_workers,
         collate_fn=collate_fn,
         sampler=sampler,
+        pin_memory=True,
     )
 
 
