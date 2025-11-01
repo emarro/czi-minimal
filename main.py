@@ -57,10 +57,18 @@ class ComposerWrapper(HuggingFaceModel):
         self.val_loss.tag = ""
         self.train_ar_loss = MeanMetric()
         self.train_ar_loss.tag = "ar"
+        self.val_ar_loss = MeanMetric()
+        self.val_ar_loss.tag = "ar"
         self.train_ratio_loss = MeanMetric()
         self.train_ratio_loss.tag = "ratio"
+        self.val_ratio_loss = MeanMetric()
+        self.val_ratio_loss.tag = "ratio"
+
         self.train_acc = MulticlassAccuracy(average="micro")
         self.train_acc.tag = "acc"
+
+        self.val_acc = MulticlassAccuracy(average="micro")
+        self.val_acc.tag = "acc"
 
         self.mlm = mlm
 
@@ -201,7 +209,13 @@ class ComposerWrapper(HuggingFaceModel):
                 "RatioLoss": self.train_ratio_loss,
                 "Accuracy": self.train_acc,
             }
-        return {"PearsonCorrCoef": self.val_pcc, "EvalLoss": self.val_loss}
+        return {
+            "PearsonCorrCoef": self.val_pcc,
+            "EvalLoss": self.val_loss,
+            "ARLoss": self.val_ar_loss,
+            "RatioLoss": self.val_ratio_loss,
+            "Accuracy": self.val_acc,
+        }
 
 
 def build_model(cfg: DictConfig):
