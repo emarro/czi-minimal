@@ -9,6 +9,7 @@ from typing import cast
 import fire
 import torch
 from caduceus import CaduceusConfig, CaduceusForMaskedLM, CaduceusTokenizer
+from collections import namedtuple
 from composer import Trainer
 from composer.callbacks import (
     LRMonitor,
@@ -28,6 +29,7 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
 from torchmetrics import PearsonCorrCoef
 from torchmetrics.aggregation import MeanMetric
+from torchlmetrics.calssification import MulticlassAccuracy
 from transformers import (
     DataCollatorForLanguageModeling,
     AutoConfig,
@@ -48,15 +50,59 @@ logger = logging.getLogger(__name__)
 
 
 class ComposerWrapper(HuggingFaceModel):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, mlm=True, **kwargs):
         super().__init__(*args, **kwargs)
         self.val_pcc = PearsonCorrCoef()
         self.val_loss = MeanMetric()
+        self.val_loss.tag = ""
+        self.train_ar_loss = MeanMetric()
+        self.train_ar_loss.tag = "ar"
+        self.train_ratio_loss = MeanMetric()
+        self.train_ratio_loss.tag = "ratio"
+        self.train_acc = MulticlassAccuracy(average="micro")
+        self.train_acc.tag = "acc"
+
+        self.mlm = mlm
 
     def eval_forward(self, batch, outputs=None):
+        alt_outputs = None  # hacky placeholder for second fwd pass for ALT seqs in VEP
         if outputs:
             return outputs
+        if "ref_id" in batch and not self.mlm:
+            # if we're doning a VEP task, it makes life much easier to do the ALT fwd pass here and shove it into the output tuple
+            ref_bp_id = batch["ref_id"]  # [B]
+            ref_ids = batch["input_ids"].detach().clone()
+            B, seq_len = ref_ids.shape
+            # update (possibly masked) token with ref
+            ref_ids[:, (seq_len // 2) - 1] = ref_bp_id
+
+            alt_bp_id = batch["alt_id"]  # [B]
+            alt_ids = batch["input_ids"].detach().clone()
+            B, seq_len = alt_ids.shape
+            # update (possibly masked) token with alt
+            alt_ids[:, (seq_len // 2) - 1] = alt_bp_id
+
+            alt_outputs = self.model(input_ids=alt_ids)
+
+            new_batch = {
+                "input_ids": ref_ids,
+                "labels": batch["labels"],
+                "loss_weights": batch["loss_weights"],
+            }
+
+            if "target_ratio" in batch:
+                new_batch["target_ratio"] = batch["target_ratio"]
+
+            batch = new_batch
+
         outputs = self.model(**batch)
+
+        if alt_outputs is not None:
+            # hacky way to add the alternate input to the output tuple posthoc
+            outputs = outputs._asdict()
+            outputs["alt_outputs"] = alt_outputs
+            new_namedtuple = namedtuple("CausalLMOutputsforZS", outputs.keys())
+            outputs = new_namedtuple(**outputs)
         return outputs
 
     def update_metric(self, batch, outputs, metric) -> None:
@@ -313,7 +359,7 @@ def build_dataloader(
             encoding["labels"] = labels
             repeat_loss = self.repeat_weight
             # Repeat regions are reweighted to repeat_loss. 1 otherwise.
-            loss_weights = (is_lowercase * (repeat_loss - 1) + 1
+            loss_weights = (is_lowercase * (repeat_loss - 1)) + 1
             encoding["loss_weights"] = loss_weights
             if self.default_target_ratio is not None:
                 encoding["target_ratio"] = torch.tensor(self.default_target_ratio)
