@@ -4,9 +4,14 @@ data_remote: "kuleshov-group/Angiosperm_16_genomes"
 eval_remote: "emarro/maize-allele-frequency-20k-val"
 max_seq_len: 512
 run_name: "pcad1_from_scratch_${pretrained_name_or_path}"
+
+mlm: False #Whether we're training an MLM model or AR
 mlm_probability: 0.15 # prob of masking a given token in an input sequence
 mask_replace_prob: 0.80 # prob of replacing a masked token with [MASK]
 random_replace_prob: 0.10 #prob of replacing a masked token with another token in the vocab
+
+#HNet specific param
+default_target_ratio: #None if not an HNet model
 
 repeat_weight: 0.10 #downweight losses for soft-masked DNA regions
 
