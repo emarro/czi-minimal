@@ -29,7 +29,7 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
 from torchmetrics import PearsonCorrCoef
 from torchmetrics.aggregation import MeanMetric
-from torchlmetrics.calssification import MulticlassAccuracy
+from torchmetrics.classification import MulticlassAccuracy
 from transformers import (
     DataCollatorForLanguageModeling,
     AutoConfig,
@@ -439,11 +439,11 @@ def build_dataloader(
                 logger.info("========================\n")
 
             # Add labels to the encoding
-            encoding["labels"] = labels if self.mlm else labels[:-1]
+            encoding["labels"] = labels if self.mlm else labels[1:]
             repeat_loss = self.repeat_weight
             # Repeat regions are reweighted to repeat_loss. 1 otherwise.
             loss_weights = (is_lowercase * (repeat_loss - 1)) + 1
-            encoding["loss_weights"] = loss_weights if self.mlm else loss_weights[:-1]
+            encoding["loss_weights"] = loss_weights if self.mlm else loss_weights[1:]
             if self.default_target_ratio is not None:
                 encoding["target_ratio"] = torch.tensor(self.default_target_ratio)
 
