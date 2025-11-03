@@ -26,8 +26,8 @@ model:
   arch_layout: ["m3t1", ["M15"], "m4"] #architecture for DNA from Table 7 with best PPL in HNet paper
 
   #values below are all placeholder
-  d_model: [128, 128]
-  d_intermediate: [0, 1024]
+  d_model: [512, 512]
+  d_intermediate: [512, 768]
   vocab_size: 16
   ssm_cfg:
     chunk_size: 256
@@ -35,9 +35,9 @@ model:
     d_state: 128
     expand: 2
   attn_cfg:
-    num_heads: [16, 16]
-    rotary_emb_dim: [32, 48]
-    window_size: [1023, -1]
+    num_heads: [8, 8]
+    rotary_emb_dim: [16, 32]
+    window_size: [511, -1]
   tie_embeddings: False
 
 # Training configuration
@@ -54,7 +54,6 @@ global_train_batch_size: 2048
 #   PyTorch bugs, e.g. integer overflow.  In this case, please manually set device_train_microbatch_size explicitly
 #   to an integer instead.
 device_train_microbatch_size: "auto"
-# device_train_microbatch_size: 8
 
 # Use float32 precision because bfloat16 (bf16) requires newer GPUs than the Tesla GPU
 # configured for this environment.  Using this precision requires Ampere or later generations,
