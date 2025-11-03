@@ -28,7 +28,7 @@ from datasets import load_dataset
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
 from torchmetrics import PearsonCorrCoef
-from torchmetrics.aggregation import MeanMetric
+from torchmetrics.aggregation import MeanMetric, RunningMean
 from torchmetrics.classification import MulticlassAccuracy
 from transformers import (
     DataCollatorForLanguageModeling,
@@ -55,19 +55,19 @@ class ComposerWrapper(HuggingFaceModel):
         self.val_pcc = PearsonCorrCoef()
         self.val_loss = MeanMetric()
         self.val_loss.tag = ""
-        self.train_ar_loss = MeanMetric()
+        self.train_ar_loss = RunningMean()
         self.train_ar_loss.tag = "ar"
         self.val_ar_loss = MeanMetric()
         self.val_ar_loss.tag = "ar"
-        self.train_ratio_loss = MeanMetric()
+        self.train_ratio_loss = RunningMean()
         self.train_ratio_loss.tag = "ratio"
         self.val_ratio_loss = MeanMetric()
         self.val_ratio_loss.tag = "ratio"
 
-        self.train_acc = MulticlassAccuracy(average="micro")
+        self.train_acc = MulticlassAccuracy(average="micro", ignore_index=-100)
         self.train_acc.tag = "acc"
 
-        self.val_acc = MulticlassAccuracy(average="micro")
+        self.val_acc = MulticlassAccuracy(average="micro", ignore_index=-100)
         self.val_acc.tag = "acc"
 
         self.mlm = mlm
