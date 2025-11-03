@@ -588,7 +588,9 @@ def run_training(config_path: str = "config.yaml"):
             split="validation",
         )
     val_loader = Evaluator(
-        label="eval_split", dataloader=val_loader, metric_names=["MeanMetric"]
+        label="eval_split",
+        dataloader=val_loader,
+        metric_names=["EvalLoss", "ARLoss", "RatioLoss", "Accuracy"],
     )
     eval_dataloaders = [val_loader]
     if cfg.eval_remote is not None:
