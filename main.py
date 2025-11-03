@@ -142,7 +142,8 @@ class ComposerWrapper(HuggingFaceModel):
                 return
             else:
                 val = outputs.loss
-            metric.update(value=val)
+            if val is not None:
+                metric.update(value=val)
             return
         probs = outputs.logits.softmax(dim=-1)
         batch_size, seq_len, vocab_len = outputs.shape
