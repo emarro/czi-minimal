@@ -3,41 +3,42 @@ data_local: #./data
 data_remote: "kuleshov-group/Angiosperm_16_genomes"
 eval_remote: "emarro/maize-allele-frequency-20k-val"
 max_seq_len: 512
-run_name: "pcad1_from_scratch_${pretrained_name_or_path}"
+run_name: "test_hnet"
+mlm: False # whether we're in an MLM masking setup
+default_target_ratio: 6 #N from HNet paper, returned per batch, default to 6 if now overwritten in code
+hnet_model: True #Temporary flag to load hnet model
 
-mlm: False #Whether we're training an MLM model or AR
+#unused if MLM is False
 mlm_probability: 0.15 # prob of masking a given token in an input sequence
 mask_replace_prob: 0.80 # prob of replacing a masked token with [MASK]
 random_replace_prob: 0.10 #prob of replacing a masked token with another token in the vocab
 
-#HNet specific param
-default_target_ratio: #None if not an HNet model
-
 repeat_weight: 0.10 #downweight losses for soft-masked DNA regions
 
-from_pretrained: True
-from_scratch: True
-pretrained_name_or_path: "kuleshov-group/PlantCaduceus_l20"
+from_pretrained: False
+from_scratch: False
+pretrained_name_or_path:  ""
 
 # Model configuration
 model:
   pad_token_id: -100  # [PAD] token ID
-  model_config:
-    d_model: 128
-    n_layer: 1 #8
-    # The pretrained caduceus models use the native `CaduceusTokenizer` which
-    # has a vocab size of 12 tokens and must be padded to a multiple of
-    # `pad_vocab_size_multiple`; see:
-    # https://huggingface.co/kuleshov-group/caduceus-ph_seqlen-131k_d_model-256_n_layer-16/blob/main/tokenization_caduceus.py
-    vocab_size: 16
-    # This is the multiple used in the pretrained models, e.g.:
-    # https://huggingface.co/kuleshov-group/caduceus-ph_seqlen-131k_d_model-256_n_layer-16/blob/main/config.json#L42
-    pad_vocab_size_multiple: 8  # Ensure vocab size is multiple of 8
-    # This is important because even though padding is not used in caduceus pretraining,
-    # the loss functions are configured to use this sentinel index to ignore any special tokens at:
-    # https://github.com/kuleshov-group/caduceus/blob/2593c807ebfc0aede05e7a991474b1a0e60fdc93/caduceus/modeling_caduceus.py#L477-L482
-    # This can be confusing because all tokenizers used with Caduceus (at TOW) also have a pad token with an index that is not -100,
-    # e.g. `CaduceusTokenizer` has a pad token with index 1 and the songlab/tokenizer-dna-mlm tokenizer uses 0.
+  ratio_loss_weight: 0.03 #alpha from the paper
+  arch_layout: ["m3t1", ["M15"], "m4"] #architecture for DNA from Table 7 with best PPL in HNet paper
+
+  #values below are all placeholder
+  d_model: [512, 512]
+  d_intermediate: [512, 768]
+  vocab_size: 16
+  ssm_cfg:
+    chunk_size: 256
+    d_conv: 4
+    d_state: 128
+    expand: 2
+  attn_cfg:
+    num_heads: [8, 8]
+    rotary_emb_dim: [16, 32]
+    window_size: [511, -1]
+  tie_embeddings: False
 
 # Training configuration
 seed: 42
@@ -53,7 +54,6 @@ global_train_batch_size: 2048
 #   PyTorch bugs, e.g. integer overflow.  In this case, please manually set device_train_microbatch_size explicitly
 #   to an integer instead.
 device_train_microbatch_size: "auto"
-# device_train_microbatch_size: 8
 
 # Use float32 precision because bfloat16 (bf16) requires newer GPUs than the Tesla GPU
 # configured for this environment.  Using this precision requires Ampere or later generations,
