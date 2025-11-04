@@ -1,0 +1,11 @@
+defaults:
+  - _self_
+  - dataset: angiosperm_16
+  - eval_dataset: maize_allele_freq
+  - loggers: null
+  - callbacks: null
+  - trainer: default
+  - optimizer: decoupled_adamw
+  - scheduler: cosine_annealing_with_warmup
+  - paths: default
+  - model: pcad1_l20_pretrained

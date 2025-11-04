@@ -4,9 +4,10 @@ import logging
 import os
 import random
 from pathlib import Path
-from typing import cast
+from typing import cast, Optional
 
 import fire
+import hydra
 import torch
 from caduceus import CaduceusConfig, CaduceusForMaskedLM, CaduceusTokenizer
 from collections import namedtuple
@@ -313,6 +314,9 @@ def build_dataloader(
     cfg: DictConfig,
     tokenizer,
     batch_size: int,
+    max_seq_len: int,
+    mlm: bool,
+    default_target_ratio: Optional[int] = None,
     split: str = "train",
     eval_only: bool = False,
 ):
@@ -324,7 +328,7 @@ def build_dataloader(
     )
     mask_seq = False
     if eval_only:
-        dataset_name_or_path = cfg.eval_remote
+        dataset_name_or_path = cfg.data_remote
         # split naming error
         split = "train"
         mask_seq = True
@@ -333,13 +337,17 @@ def build_dataloader(
         # data_files={split: os.path.join(cfg.data_local, f"{split}.txt")},
         split=split,
     )
+
+    cutoff = cfg.get("cutoff", None)
     # Filter sequences that remain with lots of "N"s
-    logger.info(f"Dataset length {len(dataset)}")
-    cutoff = 0.6
-    dataset = dataset.filter(
-        lambda batch: batch["seq"].count("N") < len(batch["seq"]) * cutoff
-    )
-    logger.info(f"Dataset length {len(dataset)}")
+    if cutoff is not None:
+        logger.info(f"Dataset length: {len(dataset)}")
+        dataset = dataset.filter(
+            lambda batch: batch["seq"].count("N") < len(batch["seq"]) * cutoff
+        )  # keep if percentage of N is less than cutoff
+        logger.info(
+            f"Dataset length after filter with cutoff {cutoff * 100}%: {len(dataset)}"
+        )
 
     class TokenizedDataset(Dataset):
         def __init__(
@@ -376,11 +384,11 @@ def build_dataloader(
             logger.info(f"Max sequence length: {max_length}")
 
             # Print first few sequences
-            logger.info("\n=== Example Sequences ===")
-            for i in range(min(3, len(dataset))):
-                logger.info(f"Example {i} text: {dataset[i][self.seq_idx][:50]}...")
-                logger.info(f"Example {i} ds: {self[i]}")
-            logger.info("========================\n")
+            # logger.info("\n=== Example Sequences ===")
+            # for i in range(min(3, len(dataset))):
+            #    logger.info(f"Example {i} text: {dataset[i][self.seq_idx][:50]}...")
+            #    logger.info(f"Example {i} ds: {self[i]}")
+            # logger.info("========================\n")
 
         def __len__(self):
             return len(self.dataset)
@@ -459,18 +467,18 @@ def build_dataloader(
                 encoding["input_ids"] = encoding["input_ids"][:-1]
 
             # Print detailed info for first few batches
-            if idx < 0:
-                logger.info(f"\n=== Example {idx} Details ===")
-                logger.info(f"Raw text length: {len(item[self.seq_idx])}")
-                logger.info(f"Raw text: {item[self.seq_idx][:50]}...")
-                logger.info(f"Input IDs length: {len(encoding['input_ids'])}")
-                logger.info(f"Input IDs: {encoding['input_ids'][:50]}...")
-                logger.info(f"DNA token mask: {valid_dna_tokens[:50]}...")
-                logger.info(f"Labels: {labels[:50]}")
-                logger.info(
-                    f"Number of DNA tokens to predict: {valid_dna_tokens.sum()}"
-                )
-                logger.info("========================\n")
+            # if idx < 0:
+            # logger.info(f"\n=== Example {idx} Details ===")
+            # logger.info(f"Raw text length: {len(item[self.seq_idx])}")
+            # logger.info(f"Raw text: {item[self.seq_idx][:50]}...")
+            # logger.info(f"Input IDs length: {len(encoding['input_ids'])}")
+            # logger.info(f"Input IDs: {encoding['input_ids'][:50]}...")
+            # logger.info(f"DNA token mask: {valid_dna_tokens[:50]}...")
+            # logger.info(f"Labels: {labels[:50]}")
+            # logger.info(
+            #    f"Number of DNA tokens to predict: {valid_dna_tokens.sum()}"
+            # )
+            # logger.info("========================\n")
 
             # Add labels to the encoding
             encoding["labels"] = labels if self.mlm else labels[1:]
@@ -486,45 +494,47 @@ def build_dataloader(
     tokenized_dataset = TokenizedDataset(
         dataset,
         tokenizer,
-        cfg.max_seq_len,
+        max_seq_len,
         cfg.repeat_weight,
         mask_seq=mask_seq,
-        default_target_ratio=cfg.default_target_ratio,
-        mlm=cfg.mlm,
+        default_target_ratio=default_target_ratio,
+        mlm=mlm,
     )
     sampler = dist.get_sampler(tokenized_dataset, shuffle=(split == "train"))
     collate_fn = (
         DataCollatorForLanguageModeling(
             tokenizer=tokenizer,
-            mlm=cfg.mlm,
+            mlm=mlm,
             mlm_probability=cfg.mlm_probability if not mask_seq else 0.0,
             mask_replace_prob=cfg.mask_replace_prob,
             random_replace_prob=cfg.random_replace_prob,
         )
-        if cfg.mlm
+        if (mlm and not eval_only)
         else None
     )  # Collator overwrites the labels from __getitem__, disable if not mlm!
 
     return DataLoader(
         tokenized_dataset,
         batch_size=batch_size,
-        num_workers=cfg.train_loader.num_workers,
+        num_workers=cfg.num_workers,
         collate_fn=collate_fn,
         sampler=sampler,
         pin_memory=True,
     )
 
 
-def run_training(config_path: str = "config.yaml"):
+@hydra.main(version_base=None, config_path="config", config_name="train")
+def run_training(cfg: DictConfig) -> None:
     """Train the model using the specified config."""
     logger.info("Starting training...")
+    print(cfg)
 
     # Load config
-    cfg = OmegaConf.load(config_path)
+    # cfg = OmegaConf.load(config_path)
     cfg = cast(DictConfig, cfg)
 
     # Set seed for reproducibility
-    reproducibility.seed_all(cfg.seed)
+    reproducibility.seed_all(cfg.trainer.seed)
 
     # Initialize distributed training
     if not dist.is_initialized():
@@ -532,21 +542,22 @@ def run_training(config_path: str = "config.yaml"):
 
     # Build model
     logger.info("Building model...")
-    model = build_model(cfg)
+    model = hydra.utils.instantiate(cfg.model)
+    # model = build_model(cfg)
 
     # Build optimizer
-    optimizer = DecoupledAdamW(
+    optimizer = hydra.utils.instantiate(
+        cfg.optimizer,
         model.parameters(),
-        lr=cfg.optimizer.lr,
-        betas=cfg.optimizer.betas,
-        eps=cfg.optimizer.eps,
-        weight_decay=cfg.optimizer.weight_decay,
+        # lr=cfg.optimizer.lr,
+        # betas=cfg.optimizer.betas,
+        # eps=cfg.optimizer.eps,
+        # weight_decay=cfg.optimizer.weight_decay,
     )
 
     # Build scheduler
-    scheduler = CosineAnnealingWithWarmupScheduler(
-        t_warmup=cfg.scheduler.t_warmup, alpha_f=cfg.scheduler.alpha_f
-    )
+    scheduler = hydra.utils.instantiate(cfg.scheduler)
+    print(scheduler)
 
     # Build callbacks
     callbacks = [
@@ -561,45 +572,45 @@ def run_training(config_path: str = "config.yaml"):
     loggers = []
     if "wandb" in cfg.get("loggers", {}):
         loggers.append(WandBLogger(**cfg.loggers.wandb))
+        # loggers[-1].log_hyperparameters(cfg)
 
     # Build data loaders
     logger.info("Building data loaders...")
     train_loader = build_dataloader(
-        cfg,
+        cfg.dataset,
         model.tokenizer,
-        cfg.global_train_batch_size // dist.get_world_size(),
+        cfg.trainer.global_train_batch_size // dist.get_world_size(),
         split="train",
+        max_seq_len=cfg.model.max_seq_len,
+        mlm=cfg.model.mlm,
+        default_target_ratio=cfg.model.get("default_target_ratio", None),
     )
-
     val_loader = None
-    if cfg.data_local is not None:
-        if os.path.exists(os.path.join(cfg.data_local, "val.txt")):
-            val_loader = build_dataloader(
-                cfg,
-                model.tokenizer,
-                cfg.global_train_batch_size // dist.get_world_size(),
-                split="val",
-            )
-    else:
-        val_loader = build_dataloader(
-            cfg,
-            model.tokenizer,
-            cfg.global_train_batch_size // dist.get_world_size(),
-            split="validation",
-        )
+    val_loader = build_dataloader(
+        cfg.dataset,
+        model.tokenizer,
+        cfg.trainer.global_train_batch_size // dist.get_world_size(),
+        split="validation",
+        max_seq_len=cfg.model.max_seq_len,
+        mlm=cfg.model.mlm,
+        default_target_ratio=cfg.model.get("default_target_ratio", None),
+    )
     val_loader = Evaluator(
         label="eval_split",
         dataloader=val_loader,
         metric_names=["EvalLoss", "ARLoss", "RatioLoss", "Accuracy"],
     )
     eval_dataloaders = [val_loader]
-    if cfg.eval_remote is not None:
+    if cfg.eval_dataset is not None:
         zeroshot_val_loader = build_dataloader(
-            cfg,
+            cfg.eval_dataset,
             model.tokenizer,
-            cfg.global_train_batch_size // dist.get_world_size(),
+            cfg.trainer.global_train_batch_size // dist.get_world_size(),
             split="validation",
             eval_only=True,
+            max_seq_len=cfg.model.max_seq_len,
+            mlm=cfg.model.mlm,
+            default_target_ratio=None,
         )
         zeroshot_val_loader = Evaluator(
             label="maize_allele_freq",
@@ -610,18 +621,19 @@ def run_training(config_path: str = "config.yaml"):
 
     # Create trainer; see
     # https://docs.mosaicml.com/projects/composer/en/latest/api_reference/generated/composer.Trainer.html
+    print(f"Eval interval: {cfg.trainer.eval_interval}")
     trainer = Trainer(
         model=model,
         train_dataloader=train_loader,
         eval_dataloader=eval_dataloaders,
         optimizers=optimizer,
         schedulers=scheduler,
-        max_duration=cfg.max_duration,
-        eval_interval=cfg.get("eval_interval", "1000ba"),
+        max_duration=cfg.trainer.max_duration,
+        eval_interval=cfg.trainer.eval_interval,
         callbacks=callbacks,
         loggers=loggers,
-        precision=cfg.precision,
-        device_train_microbatch_size=cfg.device_train_microbatch_size,
+        precision=cfg.trainer.precision,
+        device_train_microbatch_size=cfg.trainer.device_train_microbatch_size,
         save_folder=cfg.get("save_folder"),
         save_interval=cfg.get("save_interval", "1000ba"),
         save_num_checkpoints_to_keep=cfg.get("save_num_checkpoints_to_keep", -1),
@@ -633,8 +645,4 @@ def run_training(config_path: str = "config.yaml"):
 
 
 if __name__ == "__main__":
-    fire.Fire(
-        {
-            "run_training": run_training,
-        }
-    )
+    run_training()

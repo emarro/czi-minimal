@@ -1,0 +1,22 @@
+_target_: wrappers.hnet.build_model
+pad_token_id: -100  # [PAD] token ID
+ratio_loss_weight: 0.03 #alpha from the paper
+arch_layout: ["m3t1", ["M15"], "m4"] #architecture for DNA from Table 7 with best PPL in HNet paper
+
+#values below are all placeholder
+d_model: [512, 512] #d_model of each stage (matches stages from arch_layout)
+d_intermediate: [512, 768] # size of FFN sizes corresponding to above
+vocab_size: 16
+ssm_cfg:
+  chunk_size: 256
+  d_conv: 4
+  d_state: 128
+  expand: 2
+attn_cfg:
+  num_heads: [8, 8]
+  rotary_emb_dim: [16, 32]
+  window_size: [511, -1]
+tie_embeddings: False
+
+max_seq_len: 512
+mlm: False

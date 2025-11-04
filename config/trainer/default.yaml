@@ -1,0 +1,23 @@
+seed: 42
+max_duration: "50ep" #"500ba"  # Train for 50 epochs
+eval_interval: "5000ba"  # Evaluate every 5k batches
+global_train_batch_size: 2048
+
+# Use a fixed microbatch size to avoid this warning, which does become an error
+# in the evironment configured for this project:
+# /home/ubuntu/repos/composer/composer/trainer/trainer.py:247: UserWarning: `device_train_microbatch_size='auto'`
+#   may potentially fail with unexpected CUDA errors. Auto microbatching attempts to catch CUDA Out of Memory
+#   errors and adjust the batch size, but it is possible CUDA will be put into an irrecoverable state due to
+#   PyTorch bugs, e.g. integer overflow.  In this case, please manually set device_train_microbatch_size explicitly
+#   to an integer instead.
+device_train_microbatch_size: "auto"
+# device_train_microbatch_size: 8
+
+# Use float32 precision because bfloat16 (bf16) requires newer GPUs than the Tesla GPU
+# configured for this environment.  Using this precision requires Ampere or later generations,
+# and this error occurs otherwise: "Feature '.bf16' requires .target sm_80 or higher".  In short:
+# - fp32: works on all GPUs but uses more memory
+# - amp_bf16: requires Ampere (A100) or newer GPUs (sm_80+)
+# - amp_fp16: alternative for older GPUs but less numerically stable
+# precision: amp_bf16 # update for Composer release/v0.12.1
+precision: "amp_bf16"
