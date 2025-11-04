@@ -637,7 +637,8 @@ def run_training(cfg: DictConfig) -> None:
         save_folder=cfg.get("save_folder"),
         save_interval=cfg.get("save_interval", "1000ba"),
         save_num_checkpoints_to_keep=cfg.get("save_num_checkpoints_to_keep", -1),
-        run_name=cfg.get("run_name", "caduceus-train"),
+        run_name=cfg.get("run_name", f"hnet-train-{cfg.model.default_target_ratio}"),
+        autoresume=True,
     )
 
     # Start training
