@@ -563,7 +563,12 @@ def run_training(cfg: DictConfig) -> None:
     callbacks = [
         LRMonitor(),
         SpeedMonitor(window_size=100),
-        CheckpointSaver(weights_only=True),
+        CheckpointSaver(
+            weights_only=False,
+            folder=cfg.trainer.get("save_folder"),
+            save_interval=cfg.trainer.get("save_interval", "1000ba"),
+            num_checkpoints_to_keep=cfg.trainer.get("save_num_checkpoints_to_keep", -1),
+        ),
         RuntimeEstimator(),
         MemoryMonitor(),
     ]
@@ -634,10 +639,12 @@ def run_training(cfg: DictConfig) -> None:
         loggers=loggers,
         precision=cfg.trainer.precision,
         device_train_microbatch_size=cfg.trainer.device_train_microbatch_size,
-        save_folder=cfg.get("save_folder"),
-        save_interval=cfg.get("save_interval", "1000ba"),
-        save_num_checkpoints_to_keep=cfg.get("save_num_checkpoints_to_keep", -1),
-        run_name=cfg.get("run_name", f"hnet-train-{cfg.model.default_target_ratio}"),
+        # save_folder=cfg.trainer.get("save_folder"),
+        # ave_interval=cfg.trainer.get("save_interval", "1000ba"),
+        # ave_num_checkpoints_to_keep=cfg.trainer.get(
+        #   "save_num_checkpoints_to_keep", -1
+        # ,
+        run_name=cfg.run_name,
         autoresume=True,
     )
 
