@@ -577,7 +577,30 @@ def run_training(cfg: DictConfig) -> None:
     # Build loggers
     loggers = []
     if "wandb" in cfg.get("loggers", {}):
-        loggers.append(WandBLogger(**cfg.loggers.wandb))
+        from dotenv import load_dotenv
+
+        load_dotenv(cfg.paths.env_path)
+        api_key = cfg.loggers.wandb.api_key
+        if api_key is None and "WANDB_API_KEY" not in os.environ:
+            raise Exception(
+                "WANDB logger instantiated by not API key was provided, make sure .env is set up properly"
+            )
+        os.environ["WANDB_API_KEY"] = api_key
+        loggers.append(
+            WandBLogger(
+                project=cfg.loggers.wandb.project,
+                entity=cfg.loggers.wandb.entity,
+                tags=cfg.loggers.wandb.tags
+                if cfg.loggers.wandb.tags is not None
+                else None,
+                init_kwargs={
+                    "config": OmegaConf.to_container(cfg, resolve=True),
+                    "config_exclude_keys": [
+                        "loggers"
+                    ],  # dont include loggers in config, might leak api keys
+                },
+            )
+        )
         # loggers[-1].log_hyperparameters(cfg)
 
     # Build data loaders

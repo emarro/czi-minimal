@@ -1,3 +1,5 @@
 wandb:
+  api_key: ${oc.env:WANDB_API_KEY}
   project: "Composer Eval Test"
   entity: "emarro"
+  tags: null

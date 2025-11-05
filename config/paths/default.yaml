@@ -1,5 +1,6 @@
 #Base path where to write everything
 root_dir: "."
+env_path: ${paths.root_dir}/.env
 
 log_dir: ${paths.root_dir}/outputs/
 
