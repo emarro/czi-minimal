@@ -21,3 +21,11 @@ device_train_microbatch_size: "auto"
 # - amp_fp16: alternative for older GPUs but less numerically stable
 # precision: amp_bf16 # update for Composer release/v0.12.1
 precision: "amp_bf16"
+
+# path to the weights to load, e.g. for fine-tuning or for contiuning pre-training
+load_path: null
+
+# Checkpointing
+save_folder: "${paths.output_dir}/checkpoints/" # e.g. './{run_name}/ckpt' (local) or 's3://mybucket/mydir/{run_name}/ckpt' (remote)
+save_interval: "5000ba"
+save_num_checkpoints_to_keep: 1
