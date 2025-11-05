@@ -3,6 +3,7 @@
 defaults:
   - override /model: hnet
   - override /trainer: fixed_batch
+  - override /loggers: wandb
 
 tags: ["hnet", "vary_N"]
 
@@ -21,9 +22,9 @@ optimizer:
   lr: 5e-4
 
 trainer:
-  device_micro_batch_size: 8 #depends on the amount of GPU mem available
-  max_duration: "5ba"
+  device_train_microbatch_size: 256 #depends on the amount of GPU mem available
+  max_duration: "20ep"
 
-#loggers:
-#  wandb:
-#    tags: ${tags}
+loggers:
+  wandb:
+    tags: ${tags}
