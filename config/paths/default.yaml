@@ -1,0 +1,9 @@
+#Base path where to write everything
+root_dir: "."
+
+log_dir: ${paths.root_dir}/outputs/
+
+#dynamically created output dir
+# defined in the hydra config file (default configs/hydrd/default.yaml)
+# Collects everything we make at runtime (ckpts)
+output_dir: ${hydra:runtime.output_dir}
