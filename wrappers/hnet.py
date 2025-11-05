@@ -17,7 +17,7 @@ def build_model(**model_config):
     # model_config = OmegaConf.to_container(cfg, resolve=True)
     # attn_cfg = AttnConfig(**model_config.get("attn_cfg"))
     # ssm_cfg = SSMConfig(**model_config.get("ssm_cfg"))
-    ignore_keys = ["max_seq_len", "mlm", "default_target_ratio"]
+    ignore_keys = ["max_seq_len", "mlm", "default_target_ratio", "_modelstr_"]
     hnet_cfg = HNetConfig(
         **{x: v for x, v in model_config.items() if x not in ignore_keys}
     )
