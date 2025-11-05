@@ -4,7 +4,7 @@ import logging
 import os
 import random
 from pathlib import Path
-from typing import cast, Optional
+from typing import cast, Optional, Any
 
 import hydra_setup  # register resolvers for hydra
 
@@ -546,6 +546,10 @@ def run_training(cfg: DictConfig) -> None:
     logger.info("Building model...")
     model = hydra.utils.instantiate(cfg.model)
     # model = build_model(cfg)
+    num_params = sum([x.numel() for x in model.parameters()])
+    num_trainable_params = sum(
+        [x.numel() for x in model.parameters() if x.requires_grad]
+    )
 
     # Build optimizer
     optimizer = hydra.utils.instantiate(
@@ -586,6 +590,9 @@ def run_training(cfg: DictConfig) -> None:
                 "WANDB logger instantiated by not API key was provided, make sure .env is set up properly"
             )
         os.environ["WANDB_API_KEY"] = api_key
+        dict_cfg: dict[str, Any] = OmegaConf.to_container(cfg, resolve=True)
+        dict_cfg["num_params"] = num_params
+        dict_cfg["num_trainable_params"] = num_trainable_params
         loggers.append(
             WandBLogger(
                 project=cfg.loggers.wandb.project,
@@ -594,7 +601,7 @@ def run_training(cfg: DictConfig) -> None:
                 if cfg.loggers.wandb.tags is not None
                 else None,
                 init_kwargs={
-                    "config": OmegaConf.to_container(cfg, resolve=True),
+                    "config": dict_cfg,
                     "config_exclude_keys": [
                         "loggers"
                     ],  # dont include loggers in config, might leak api keys
