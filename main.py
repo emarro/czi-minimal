@@ -559,7 +559,6 @@ def run_training(cfg: DictConfig) -> None:
 
     # Build scheduler
     scheduler = hydra.utils.instantiate(cfg.scheduler)
-    print(scheduler)
 
     # Build callbacks
     callbacks = [
