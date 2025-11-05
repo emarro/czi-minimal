@@ -21,4 +21,4 @@ defaults:
   - experiment: null
 
 task_name: "train"
-run_name: "${task_name}_${model._modelstr_}_lr=${optimizer.lr}"
+run_name: "${task_name}_${clean:${model._modelstr_}}_lr-${optimizer.lr}"

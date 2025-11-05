@@ -6,6 +6,8 @@ import random
 from pathlib import Path
 from typing import cast, Optional
 
+import hydra_setup  # register resolvers for hydra
+
 import fire
 import hydra
 import torch
