@@ -1,11 +1,24 @@
 defaults:
   - _self_
+  # pretraining dtaset
   - dataset: angiosperm_16
+  # eval dataset(s)
   - eval_dataset: maize_allele_freq
+  # loggers to use (wandb)
   - loggers: null
+  # callbacks to use with trainer (not implemented)
   - callbacks: null
   - trainer: default
   - optimizer: decoupled_adamw
   - scheduler: cosine_annealing_with_warmup
+  # local paths
   - paths: default
+  # model to be trained
   - model: pcad1_l20_pretrained
+  # output paths (inherits from local paths above)
+  - hydra: default
+  # overrids for specific experiments
+  - experiment: null
+
+task_name: "train"
+run_name: "${task_name}_${model._modelstr_}_lr=${optimizer.lr}"
