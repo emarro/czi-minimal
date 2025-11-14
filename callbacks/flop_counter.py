@@ -42,7 +42,7 @@ class FlopMonitor(Callback):
             logger.log_metrics(
                 {"flop_counter/totaL-train_flops": self.total_train_flops}
             )
-            print(f"Logging {self.total_train_flops / 1e12:,} TFlOPs")
+            # print(f"Logging {self.total_train_flops / 1e12:,} TFlOPs")
 
         self.history_flops.append(batch_flops)
         if len(self.history_flops) == self.history_flops.maxlen:
