@@ -49,6 +49,13 @@ from hnet.models.config_hnet import (
 from hnet.utils.tokenizers import ByteTokenizer
 
 
+from composer.models.tasks import ComposerClassifier
+from composer.profiler import JSONTraceHandler, cyclic_schedule
+from composer.profiler.profiler import Profiler
+
+from callbacks.flop_counter import FlopMonitor
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -573,9 +580,11 @@ def run_training(cfg: DictConfig) -> None:
             folder=cfg.trainer.get("save_folder"),
             save_interval=cfg.trainer.get("save_interval", "1000ba"),
             num_checkpoints_to_keep=cfg.trainer.get("save_num_checkpoints_to_keep", -1),
+            overwrite=cfg.trainer.get("save_overwrite", False),
         ),
         RuntimeEstimator(),
         MemoryMonitor(),
+        FlopMonitor(),
     ]
 
     # Build loggers
@@ -654,10 +663,14 @@ def run_training(cfg: DictConfig) -> None:
             metric_names=["PearsonCorrCoef"],
         )
         eval_dataloaders = [val_loader, zeroshot_val_loader]
+        eval_dataloaders = None
 
     # Create trainer; see
     # https://docs.mosaicml.com/projects/composer/en/latest/api_reference/generated/composer.Trainer.html
     print(f"Eval interval: {cfg.trainer.eval_interval}")
+    composer_trace_dir = "composer_profiler"
+    torch_trace_dir = "torch_profiler"
+
     trainer = Trainer(
         model=model,
         train_dataloader=train_loader,
@@ -676,11 +689,26 @@ def run_training(cfg: DictConfig) -> None:
         #   "save_num_checkpoints_to_keep", -1
         # ,
         run_name=cfg.run_name,
-        autoresume=True,
+        autoresume=cfg.trainer.autoresume,
+        profiler=Profiler(
+            trace_handlers=[
+                JSONTraceHandler(folder=composer_trace_dir, overwrite=True)
+            ],
+            schedule=cyclic_schedule(
+                wait=1,
+                warmup=1,
+                active=3,
+                repeat=1,
+            ),
+            torch_prof_folder=torch_trace_dir,
+            torch_prof_overwrite=True,
+            torch_prof_memory_filename=None,
+            torch_prof_with_stack=True,
+        ),
     )
 
     # Start training
-    trainer.fit()
+    trainer.fit(reset_time=True)
 
 
 if __name__ == "__main__":
