@@ -690,25 +690,25 @@ def run_training(cfg: DictConfig) -> None:
         # ,
         run_name=cfg.run_name,
         autoresume=cfg.trainer.autoresume,
-        profiler=Profiler(
-            trace_handlers=[
-                JSONTraceHandler(folder=composer_trace_dir, overwrite=True)
-            ],
-            schedule=cyclic_schedule(
-                wait=1,
-                warmup=1,
-                active=3,
-                repeat=1,
-            ),
-            torch_prof_folder=torch_trace_dir,
-            torch_prof_overwrite=True,
-            torch_prof_memory_filename=None,
-            torch_prof_with_stack=True,
-        ),
+        # profiler=Profiler(
+        #    trace_handlers=[
+        #        JSONTraceHandler(folder=composer_trace_dir, overwrite=True)
+        # ],
+        #    schedule=cyclic_schedule(
+        #        wait=1,
+        #        warmup=1,
+        #        active=3,
+        #        repeat=1,
+        #    ),
+        #    torch_prof_folder=torch_trace_dir,
+        #    torch_prof_overwrite=True,
+        #    torch_prof_memory_filename=None,
+        #    torch_prof_with_stack=True,
+        # ),
     )
 
     # Start training
-    trainer.fit(reset_time=True)
+    trainer.fit(reset_time=cfg.trainer.get("reset_time", False))
 
 
 if __name__ == "__main__":
