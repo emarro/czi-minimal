@@ -11,7 +11,7 @@ from typing import Any, cast
 
 
 class FlopMonitor(Callback):
-    def __init__(self, *args: Any, log_every: int = 10, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, log_every: int = 100, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.total_train_flops = 0.0
         self.log_every = log_every
