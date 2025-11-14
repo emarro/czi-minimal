@@ -7,7 +7,7 @@ from composer.loggers import Logger
 from composer.models.base import ComposerModel
 from composer.utils import dist
 
-from typing import Any
+from typing import Any, cast
 
 
 class FlopMonitor(Callback):
@@ -35,14 +35,16 @@ class FlopMonitor(Callback):
 
     def batch_end(self, state: State, logger: Logger) -> None:
         self.history_wct.append(state.timestamp.total_wct.total_seconds())
-        batch_flops = sum(state.batch_get_item("total_flops"))  # flops used in batch
-        self.history_flops.append(batch_flops)
+        batch_flops = state.outputs.total_flops  # flops used in batch
         if self.in_train:
+            batch_flops = 3 * batch_flops  # assume bkwd pass is 2x fwd pass
             self.total_train_flops += batch_flops
             logger.log_metrics(
                 {"flop_counter/totaL-train_flops": self.total_train_flops}
             )
             print(f"Logging {self.total_train_flops / 1e12:,} TFlOPs")
+
+        self.history_flops.append(batch_flops)
         if len(self.history_flops) == self.history_flops.maxlen:
             world_size = dist.get_world_size()
             elapsed_batches = len(self.history_flops) - 1
