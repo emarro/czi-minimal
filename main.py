@@ -53,7 +53,7 @@ from composer.models.tasks import ComposerClassifier
 from composer.profiler import JSONTraceHandler, cyclic_schedule
 from composer.profiler.profiler import Profiler
 
-from callbacks.flop_counter import FlopMonitor
+from callbacks.flop_counter import FlopMonitor, BPredMonitor
 
 
 logger = logging.getLogger(__name__)
@@ -585,6 +585,7 @@ def run_training(cfg: DictConfig) -> None:
         RuntimeEstimator(),
         MemoryMonitor(),
         FlopMonitor(),
+        BPredMonitor(),
     ]
 
     # Build loggers
