@@ -54,6 +54,7 @@ from composer.profiler import JSONTraceHandler, cyclic_schedule
 from composer.profiler.profiler import Profiler
 
 from callbacks.flop_counter import FlopMonitor, BPredMonitor
+from callbacks.visualizer import IGVCallBack
 
 
 logger = logging.getLogger(__name__)
@@ -699,8 +700,11 @@ def run_training(cfg: DictConfig) -> None:
             dataloader=zeroshot_val_loader,
             metric_names=["PearsonCorrCoef"],
         )
-        eval_dataloaders = [val_loader, zeroshot_val_loader]
-        # eval_dataloaders = None
+        callbacks.append(
+            IGVCallBack(target_eval_label="maize_allele_freq", log_only_N=20)
+        )
+        # eval_dataloaders = [val_loader, zeroshot_val_loader]
+        eval_dataloaders = [zeroshot_val_loader]
 
     # Create trainer; see
     # https://docs.mosaicml.com/projects/composer/en/latest/api_reference/generated/composer.Trainer.html
