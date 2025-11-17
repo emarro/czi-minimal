@@ -463,12 +463,19 @@ def build_dataloader(
             for k, v in item.items():
                 if type(v) is not str:
                     encoding[k] = torch.tensor(v)
-                else:
-                    if k == self.seq_idx:  # ignore seq
-                        continue
-                    if k not in tokenizer.aux_mappings:  # cast assembly/chr to int
-                        tokenizer.aux_mappings[k] = Vocab()
-                    encoding[k] = torch.tensor(tokenizer.aux_mappings[k][v])
+                elif k == self.seq_idx:  # ignore seq
+                    continue
+                elif k == "chrom":
+                    if v in [str(x) for x in range(1, 30)]:
+                        encoding[k] = torch.tensor(int(v))
+                    else:
+                        encoding[k] = torch.tensor(-1)
+                elif k == "annotation_mask":
+                    encoding[k] = torch.tensor(v)  # [L] boolean mask
+                    # if k not in tokenizer.aux_mappings:  # cast assembly/chr to int
+                    # tokenizer.aux_mappings[k] = Vocab()
+                    # print(tokenizer.aux_mappings)
+                # encoding[k] = torch.tensor(tokenizer.aux_mappings[k][v])
 
             is_lowercase = torch.tensor(
                 [x.islower() for x in item[self.seq_idx]],
@@ -649,7 +656,6 @@ def run_training(cfg: DictConfig) -> None:
 
     # Build data loaders
     logger.info("Building data loaders...")
-    model.tokenizer.aux_mappings = {}
     train_loader = build_dataloader(
         cfg.dataset,
         model.tokenizer,
@@ -669,6 +675,7 @@ def run_training(cfg: DictConfig) -> None:
         mlm=cfg.model.mlm,
         default_target_ratio=cfg.model.get("default_target_ratio", None),
     )
+
     val_loader = Evaluator(
         label="eval_split",
         dataloader=val_loader,
@@ -686,6 +693,7 @@ def run_training(cfg: DictConfig) -> None:
             mlm=cfg.model.mlm,
             default_target_ratio=None,
         )
+
         zeroshot_val_loader = Evaluator(
             label="maize_allele_freq",
             dataloader=zeroshot_val_loader,
