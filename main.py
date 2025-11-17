@@ -59,6 +59,27 @@ from callbacks.flop_counter import FlopMonitor, BPredMonitor
 logger = logging.getLogger(__name__)
 
 
+class Vocab(dict):
+    def __init__(self):
+        self.cur_idx = 0
+        self.idx_to_key = {}
+
+    def __getitem__(self, key):
+        if key not in self:
+            self[key] = self.cur_idx
+            self.idx_to_key[str(self.cur_idx)] = key
+            self.cur_idx += 1
+        return super().__getitem__(key)
+
+    def decode(self, key):
+        if type(key) is not str:
+            key = str(key)
+        return self.idx_to_key[key]
+
+    def decode_seq(self, seq):
+        return [self.decode(x) for x in seq]
+
+
 class ComposerWrapper(HuggingFaceModel):
     def __init__(self, *args, mlm=True, **kwargs):
         super().__init__(*args, **kwargs)
@@ -439,9 +460,15 @@ def build_dataloader(
             if ref_id is not None:
                 encoding["ref_id"] = ref_id
                 encoding["alt_id"] = alt_id
-                for k, v in item.items():
-                    if type(v) is not str:
-                        encoding[k] = torch.tensor(v)
+            for k, v in item.items():
+                if type(v) is not str:
+                    encoding[k] = torch.tensor(v)
+                else:
+                    if k == self.seq_idx:  # ignore seq
+                        continue
+                    if k not in tokenizer.aux_mappings:  # cast assembly/chr to int
+                        tokenizer.aux_mappings[k] = Vocab()
+                    encoding[k] = torch.tensor(tokenizer.aux_mappings[k][v])
 
             is_lowercase = torch.tensor(
                 [x.islower() for x in item[self.seq_idx]],
@@ -622,6 +649,7 @@ def run_training(cfg: DictConfig) -> None:
 
     # Build data loaders
     logger.info("Building data loaders...")
+    model.tokenizer.aux_mappings = {}
     train_loader = build_dataloader(
         cfg.dataset,
         model.tokenizer,
@@ -664,7 +692,7 @@ def run_training(cfg: DictConfig) -> None:
             metric_names=["PearsonCorrCoef"],
         )
         eval_dataloaders = [val_loader, zeroshot_val_loader]
-        eval_dataloaders = None
+        # eval_dataloaders = None
 
     # Create trainer; see
     # https://docs.mosaicml.com/projects/composer/en/latest/api_reference/generated/composer.Trainer.html
