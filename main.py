@@ -701,10 +701,9 @@ def run_training(cfg: DictConfig) -> None:
             metric_names=["PearsonCorrCoef"],
         )
         callbacks.append(
-            IGVCallBack(target_eval_label="maize_allele_freq", log_only_N=20)
+            IGVCallBack(target_eval_label="maize_allele_freq", log_only_N=200)
         )
-        # eval_dataloaders = [val_loader, zeroshot_val_loader]
-        eval_dataloaders = [zeroshot_val_loader]
+        eval_dataloaders = [val_loader, zeroshot_val_loader]
 
     # Create trainer; see
     # https://docs.mosaicml.com/projects/composer/en/latest/api_reference/generated/composer.Trainer.html
