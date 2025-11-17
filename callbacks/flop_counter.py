@@ -7,7 +7,14 @@ from composer.loggers import Logger
 from composer.models.base import ComposerModel
 from composer.utils import dist
 
+from io import BytesIO
+from PIL import Image
+
 from typing import Any, cast
+
+import numpy as np
+import matplotlib.pyplot as plt
+import wandb
 
 
 class FlopMonitor(Callback):
@@ -168,31 +175,31 @@ class BPredMonitor(Callback):
         min_bpics = bpics.min()  # [x.min().item() for x in bpics]
         mean_bpics = bpics.float().mean()  # [x.float().mean().item() for x in bpics]
         log = {
-            "Boundaries/Mean Seq Perc chunked in batch (1=Single Big Chunk)": compression_ratio.mean().item(),
-            "Boundaries/Max Seq Perc chunked in batch": compression_ratio.max().item(),
-            "Boundaries/Min Seq Perc chunked in batch": compression_ratio.min().item(),
-            "Boundaries/Max BPIC in batch": max_bpics.item(),
-            "Boundaries/Min BPIC in batch": min_bpics.item(),
-            "Boundaries/Mean BPIC in batch": mean_bpics.item(),
+            "Boundaries/Train/Mean Seq Perc chunked in batch (1=Single Big Chunk)": compression_ratio.mean().item(),
+            "Boundaries/Train/Max Seq Perc chunked in batch": compression_ratio.max().item(),
+            "Boundaries/Train/Min Seq Perc chunked in batch": compression_ratio.min().item(),
+            "Boundaries/Train/Max BPIC in batch": max_bpics.item(),
+            "Boundaries/Train/Min BPIC in batch": min_bpics.item(),
+            "Boundaries/Train/Mean BPIC in batch": mean_bpics.item(),
         }
-        for k, v in log.items():
-            print(f"{k}: {v:3f}")
-            # TODO: change naming in logger
+        # for k, v in log.items():
+        #    print(f"{k}: {v:3f}")
+        # TODO: change naming in logger
         logger.log_metrics(log)
         self.history_bpic.append(bpics)
-        print(f"BPIC history of len {len(self.history_bpic)}: {self.history_bpic}")
+        # print(f"BPIC history of len {len(self.history_bpic)}: {self.history_bpic}")
         if len(self.history_bpic) == self.history_bpic.maxlen:
             full_bpics = torch.cat(list(self.history_bpic), dim=0)  # [num_total_chunks]
             log = {
-                "Boundaries/Mean Seq Perc chunked windowed (1=Single Big Chunk)": compression_ratio.mean().item(),
-                "Boundaries/Max Seq Perc chunked windowed": compression_ratio.max().item(),
-                "Boundaries/Min Seq Perc chunked windowed": compression_ratio.min().item(),
-                "Boundaries/Max BPIC windowed": full_bpics.max().item(),
-                "Boundaries/Min BPIC windowed": full_bpics.min().item(),
-                "Boundaries/Mean BPIC windowed": full_bpics.float().mean().item(),
+                "Boundaries/Train/Mean Seq Perc chunked windowed (1=Single Big Chunk)": compression_ratio.mean().item(),
+                "Boundaries/Train/Max Seq Perc chunked windowed": compression_ratio.max().item(),
+                "Boundaries/Train/Min Seq Perc chunked windowed": compression_ratio.min().item(),
+                "Boundaries/Train/Max BPIC windowed": full_bpics.max().item(),
+                "Boundaries/Train/Min BPIC windowed": full_bpics.min().item(),
+                "Boundaries/Train/Mean BPIC windowed": full_bpics.float().mean().item(),
             }
-            for k, v in log.items():
-                print(f"{k}: {v:3f}")
+            # for k, v in log.items():
+            #    print(f"{k}: {v:3f}")
 
     def eval_start(self, state: State, logger: Logger):
         self.in_train = False
@@ -200,8 +207,6 @@ class BPredMonitor(Callback):
         self.history_eval_cr = list()
 
     def eval_batch_end(self, state: State, logger: Logger):
-        print(state.batch)
-        # TODO: parse out assembly, chrom, start, and end
         B, L, _ = state.outputs.logits.shape
         bpred_out = state.outputs.bpred_output  # list of bpred outputs
         # TODO: remove reshape, it's slow AF but using it to visualize indiv batches
@@ -222,20 +227,50 @@ class BPredMonitor(Callback):
         compression_ratios = torch.cat(self.history_eval_cr, dim=0)  # [num_seqs]
         bpics = torch.cat(self.history_eval_bpic, dim=0)  # [num_chunks]
         log = {
-            "Eval Boundaries/Mean Seq Perc chunked (1=Single Big Chunk)": compression_ratios.float()
+            f"Boundaries/{state.dataloader_label} Eval/Mean Seq Perc chunked (1=Single Big Chunk)": compression_ratios.float()
             .mean()
             .item(),
-            "Eval Boundaries/Max Seq Perc": compression_ratios.max().item(),
-            "Eval Boundaries/Min Seq Perc": compression_ratios.min().item(),
-            "Eval Boundaries/Max BPIC": bpics.max().item(),
-            "Eval Boundaries/Min BPIC": bpics.min().item(),
-            "Eval Boundaries/Mean BPIC": bpics.float().mean().item(),
+            f"Boundaries/{state.dataloader_label} Eval/Max Seq Perc": compression_ratios.max().item(),
+            f"Boundaries/{state.dataloader_label} Eval/Min Seq Perc": compression_ratios.min().item(),
+            f"Boundaries/{state.dataloader_label} Eval/Max BPIC": bpics.max().item(),
+            f"Boundaries/{state.dataloader_label} Eval/Min BPIC": bpics.min().item(),
+            f"Boundaries/{state.dataloader_label} Eval/Mean BPIC": bpics.float()
+            .mean()
+            .item(),
         }
         logger.log_metrics(log)
-        print(
-            f"Eval metrics on {bpics.size(0)} chunks, L=511 equals to {bpics.sum().item() // 511:,} sequences"
-        )
-        for k, v in log.items():
-            print(f"{k}: {v:3f}")
+        # print(
+        #    f"Eval metrics on {bpics.size(0)} chunks, L=511 equals to {bpics.sum().item() // 511:,} sequences"
+        # )
+        # for k, v in log.items():
+        #    print(f"{k}: {v:3f}")
         # TODO: Log a histogram of the compression ratios and off the bpics
         # TODO: Log images of the boundaries (maybe better left to a different callback or dedicated Evaluator & datasset?)
+        fig, ax = plt.subplots(figsize=(6, 4))
+        values = bpics.detach().cpu().numpy()
+        ax.hist(values, color="blue", alpha=0.7)
+        ax.set_title("Histogram of BpPIC sizes")
+        ax.set_xlabel("Size")
+        ax.set_ylabel("Count")
+        plt.tight_layout()
+        row = [wandb.Image(fig)]
+        # fig.canvas.draw()  # render the figure
+        ## Save figure to a BytesIO buffer in RGB format
+        # buf = BytesIO()
+        # fig.savefig(buf, format="png", bbox_inches="tight")
+        # buf.seek(0)
+        ## Read buffer with PIL and convert to NumPy array
+        # img_array = np.array(Image.open(buf).convert("RGB"), dtype=np.uint8).transpose(
+        #    0, 2, 1
+        # )
+        # img_array = np.frombuffer(fig.canvas.tostring_argb(), dtype=np.uint8)
+        # img_array = img_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))  # HWC
+        plt.close(fig)
+        # Log figure to WandB
+        logger.log_table(
+            name=f"{state.dataloader_label}BpPIC_histogram",
+            columns=["Hist"],
+            rows=[row],
+            step=int(state.timestamp.batch),
+        )
+        # Close figure to free memory
