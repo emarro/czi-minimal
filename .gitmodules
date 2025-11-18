@@ -1,0 +1,3 @@
+[submodule "czi-minimal"]
+	path = czi-minimal
+	url = git@github.com:emarro/czi-minimal.git
