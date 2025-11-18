@@ -25,3 +25,4 @@ use_return_dict: False
 default_target_ratio: 3
 max_seq_len: 512
 mlm: False
+log_bpreds: False

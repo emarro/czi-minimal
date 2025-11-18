@@ -592,6 +592,8 @@ def run_training(cfg: DictConfig) -> None:
     num_trainable_params = sum(
         [x.numel() for x in model.parameters() if x.requires_grad]
     )
+    logger.info(f"Num params: {num_params:,}")
+    logger.info(f"Num trainable params: {num_trainable_params:,}")
 
     # Build optimizer
     optimizer = hydra.utils.instantiate(
@@ -620,8 +622,9 @@ def run_training(cfg: DictConfig) -> None:
         RuntimeEstimator(),
         MemoryMonitor(),
         FlopMonitor(),
-        BPredMonitor(),
     ]
+    if cfg.model.get("log_bpred", False):
+        callbacks.append(BPredMonitor())
 
     # Build loggers
     loggers = []
@@ -700,9 +703,10 @@ def run_training(cfg: DictConfig) -> None:
             dataloader=zeroshot_val_loader,
             metric_names=["PearsonCorrCoef"],
         )
-        callbacks.append(
-            IGVCallBack(target_eval_label="maize_allele_freq", log_only_N=200)
-        )
+        if cfg.model.get("log_bpred", False):
+            callbacks.append(
+                IGVCallBack(target_eval_label="maize_allele_freq", log_only_N=200)
+            )
         eval_dataloaders = [val_loader, zeroshot_val_loader]
 
     # Create trainer; see
