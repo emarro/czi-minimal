@@ -44,6 +44,12 @@ class FlopMonitor(Callback):
         self.history_wct.append(state.timestamp.total_wct.total_seconds())
         batch_flops = state.outputs.total_flops  # flops used in batch
         if self.in_train:
+            # batch_flops is calculated on each GPU, sync across all GPUs
+            flops_per_batch_tensor = state.device.tensor_to_device(
+                torch.tensor(batch_flops, dtype=torch.float),
+            )
+            dist.all_reduce(flops_per_batch_tensor, reduce_operation="SUM")
+            batch_flops = flops_per_batch_tensor.item()
             batch_flops = 3 * batch_flops  # assume bkwd pass is 2x fwd pass
             self.total_train_flops += batch_flops
             logger.log_metrics(
