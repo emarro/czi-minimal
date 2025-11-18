@@ -41,21 +41,22 @@ class FlopMonitor(Callback):
         del logger  # unused
 
     def batch_end(self, state: State, logger: Logger) -> None:
+        """
+        Update FLOP count at end of every train batch
+        """
         self.history_wct.append(state.timestamp.total_wct.total_seconds())
         batch_flops = state.outputs.total_flops  # flops used in batch
-        if self.in_train:
-            # batch_flops is calculated on each GPU, sync across all GPUs
-            flops_per_batch_tensor = state.device.tensor_to_device(
-                torch.tensor(batch_flops, dtype=torch.float),
-            )
-            dist.all_reduce(flops_per_batch_tensor, reduce_operation="SUM")
-            batch_flops = flops_per_batch_tensor.item()
-            batch_flops = 3 * batch_flops  # assume bkwd pass is 2x fwd pass
-            self.total_train_flops += batch_flops
-            logger.log_metrics(
-                {"flop_counter/totaL-train_flops": self.total_train_flops}
-            )
-            # print(f"Logging {self.total_train_flops / 1e12:,} TFlOPs")
+
+        # batch_flops is calculated on each GPU, sync across all GPUs
+        flops_per_batch_tensor = state.device.tensor_to_device(
+            torch.tensor(batch_flops, dtype=torch.float),
+        )
+        dist.all_reduce(flops_per_batch_tensor, reduce_operation="SUM")
+        batch_flops = flops_per_batch_tensor.item()
+        batch_flops = 3 * batch_flops  # assume bkwd pass is 2x fwd pass
+        self.total_train_flops += batch_flops
+        logger.log_metrics({"flop_counter/totaL-train_flops": self.total_train_flops})
+        # print(f"Logging {self.total_train_flops / 1e12:,} TFlOPs")
 
         self.history_flops.append(batch_flops)
         if len(self.history_flops) == self.history_flops.maxlen:
@@ -73,12 +74,6 @@ class FlopMonitor(Callback):
                     "flop_counter/device/batches_per_sec": dev_flops_per_sec,
                 }
             )
-
-    def eval_start(self, state: State, logger: Logger):
-        self.in_train = False
-
-    def eval_all_end(self, state: State, logger: Logger):
-        self.in_train = True
 
 
 def calc_compression_ratio(num_tokens, mask):
