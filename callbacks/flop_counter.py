@@ -71,7 +71,7 @@ class FlopMonitor(Callback):
             logger.log_metrics(
                 {
                     "flop_counter/flops_per_sec": flops_per_sec,
-                    "flop_counter/device/batches_per_sec": dev_flops_per_sec,
+                    "flop_counter/device/flops_per_sec": dev_flops_per_sec,
                 }
             )
 
