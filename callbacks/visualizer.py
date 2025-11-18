@@ -1,6 +1,7 @@
 import torch
 from PIL import Image, ImageDraw, ImageFont
 from composer.core import Callback, State
+from composer.models.base import ComposerModel
 from composer.loggers import Logger
 import matplotlib.pyplot as plt
 import wandb
@@ -151,9 +152,10 @@ class IGVCallBack(Callback):
         min_weight = loss_weights.min()
         max_weight = loss_weights.max()
         is_softmasked = loss_weights == min_weight  # [B,L]
-        orig_seqs = state.model.tokenizer.batch_decode(
-            state.batch_get_item("input_ids")
-        )
+        model = state.model
+        if not isinstance(model, ComposerModel):
+            model = model.module  # pass through DDP
+        orig_seqs = model.tokenizer.batch_decode(state.batch_get_item("input_ids"))
         # TODO: Visualize the original seq, softmask, and annot_mask annotations overlaye with bpreds
 
         B, L, _ = state.outputs.logits.shape
