@@ -176,7 +176,7 @@ class BPredMonitor(Callback):
         compression_ratio = calc_compression_ratio(
             num_tokens=num_tokens, mask=mask
         ).float()
-        bpics = calc_bpic_effecient(mask).detach().clone()
+        bpics = calc_bpic_effecient(mask).detach()  # .clone()
         max_bpics = bpics.max()  # [x.max().item() for x in bpics]
         min_bpics = bpics.min()  # [x.min().item() for x in bpics]
         mean_bpics = bpics.float().mean()  # [x.float().mean().item() for x in bpics]
