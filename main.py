@@ -623,7 +623,7 @@ def run_training(cfg: DictConfig) -> None:
         MemoryMonitor(),
         FlopMonitor(),
     ]
-    if cfg.model.get("log_bpred", False):
+    if cfg.model.get("log_bpreds", False):
         callbacks.append(BPredMonitor())
 
     # Build loggers
@@ -703,7 +703,7 @@ def run_training(cfg: DictConfig) -> None:
             dataloader=zeroshot_val_loader,
             metric_names=["PearsonCorrCoef"],
         )
-        if cfg.model.get("log_bpred", False):
+        if cfg.model.get("log_bpreds", False):
             callbacks.append(
                 IGVCallBack(target_eval_label="maize_allele_freq", log_only_N=200)
             )
