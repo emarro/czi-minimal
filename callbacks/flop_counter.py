@@ -16,6 +16,30 @@ import numpy as np
 import matplotlib.pyplot as plt
 import wandb
 
+_HSERIES_SXM = {
+    "fp64": 67e12,
+    "fp32": 67e12,
+    "tf32": 989e12 / 2,
+    "fp16": 1.979e15 / 2,
+    "amp_fp16": 1.979e15 / 2,
+    "bf16": 1.979e15 / 2,
+    "amp_bf16": 1.979e15 / 2,
+    "fp8": 3.958e15 / 2,
+    "amp_fp8": 3.958e15 / 2,
+    "int8": 3.958e15 / 2,
+}
+
+
+def get_gpu_flops(state: State):
+    device_name = torch.cuda.get_device_name().lower()
+    if "h100" in device_name and "hbm3" in device_name:
+        device_tput = _HSERIES_SXM
+    else:
+        return None
+    if state.precision.value in device_tput:
+        return int(device_tput[state.precision.value])
+    return None
+
 
 class FlopMonitor(Callback):
     def __init__(self, *args: Any, log_every: int = 10, **kwargs: Any) -> None:
@@ -28,6 +52,7 @@ class FlopMonitor(Callback):
         self.history_wct: deque[float] = deque(maxlen=log_every + 1)
 
         self.in_train: bool = True
+        self.gpu_flops_available = None
 
     def state_dict(self) -> dict[str, Any]:
         return {
@@ -42,6 +67,8 @@ class FlopMonitor(Callback):
         self.microbatch_flops = state.device.tensor_to_device(
             torch.tensor(0.0, dtype=torch.float),
         )
+        if self.gpu_flops_available is None:
+            self.gpu_flops_available = get_gpu_flops(state)
 
     def after_forward(self, state: State, logger: Logger) -> None:
         batch_flops = state.outputs.total_flops  # flops used in batch
@@ -84,6 +111,9 @@ class FlopMonitor(Callback):
                     "flop_counter/device/flops_per_sec": dev_flops_per_sec,
                 }
             )
+            if self.gpu_flops_available:
+                mfu = dev_flops_per_sec / self.gpu_flops_available
+                logger.log_metrics({"flop_counter/device/mfu": mfu})
 
 
 def calc_compression_ratio(num_tokens, mask):
