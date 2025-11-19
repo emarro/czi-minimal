@@ -39,13 +39,22 @@ class FlopMonitor(Callback):
 
     def init(self, state: State, logger: Logger) -> None:
         del logger  # unused
+        self.microbatch_flops = state.device.tensor_to_device(
+            torch.tensor(0.0, dtype=torch.float),
+        )
+
+    def after_forward(self, state: State, logger: Logger) -> None:
+        batch_flops = state.outputs.total_flops  # flops used in batch
+        self.microbatch_flops += batch_flops
 
     def batch_end(self, state: State, logger: Logger) -> None:
         """
         Update FLOP count at end of every train batch
         """
         self.history_wct.append(state.timestamp.total_wct.total_seconds())
-        batch_flops = state.outputs.total_flops  # flops used in batch
+        batch_flops = (
+            self.microbatch_flops
+        )  # state.outputs.total_flops  # flops used in batch
 
         # batch_flops is calculated on each GPU, sync across all GPUs
         flops_per_batch_tensor = state.device.tensor_to_device(
@@ -53,6 +62,7 @@ class FlopMonitor(Callback):
         )
         dist.all_reduce(flops_per_batch_tensor, reduce_operation="SUM")
         batch_flops = flops_per_batch_tensor.item()
+        self.microbatch_flops *= 0.0
         batch_flops = 3 * batch_flops  # assume bkwd pass is 2x fwd pass
         self.total_train_flops += batch_flops
         logger.log_metrics({"flop_counter/totaL-train_flops": self.total_train_flops})
