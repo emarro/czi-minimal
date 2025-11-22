@@ -2,13 +2,10 @@
 
 import logging
 import os
-import random
-from pathlib import Path
 from typing import cast, Optional, Any
 
 import hydra_setup  # register resolvers for hydra
 
-import fire
 import hydra
 import torch
 from caduceus import CaduceusConfig, CaduceusForMaskedLM, CaduceusTokenizer
