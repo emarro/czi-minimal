@@ -2,13 +2,10 @@
 
 import logging
 import os
-import random
-from pathlib import Path
 from typing import cast, Optional, Any
 
 import hydra_setup  # register resolvers for hydra
 
-import fire
 import hydra
 import torch
 from caduceus import CaduceusConfig, CaduceusForMaskedLM, CaduceusTokenizer
@@ -629,9 +626,6 @@ def run_training(cfg: DictConfig) -> None:
     # Build loggers
     loggers = []
     if "wandb" in cfg.get("loggers", {}):
-        from dotenv import load_dotenv
-
-        load_dotenv(cfg.paths.env_path)
         api_key = cfg.loggers.wandb.api_key
         if api_key is None and "WANDB_API_KEY" not in os.environ:
             raise Exception(
