@@ -2,13 +2,10 @@
 
 import logging
 import os
-import random
-from pathlib import Path
 from typing import cast, Optional, Any
 
 import hydra_setup  # register resolvers for hydra
 
-import fire
 import hydra
 import torch
 from caduceus import CaduceusConfig, CaduceusForMaskedLM, CaduceusTokenizer
@@ -53,10 +50,32 @@ from composer.models.tasks import ComposerClassifier
 from composer.profiler import JSONTraceHandler, cyclic_schedule
 from composer.profiler.profiler import Profiler
 
-from callbacks.flop_counter import FlopMonitor
+from callbacks.flop_counter import FlopMonitor, BPredMonitor
+from callbacks.visualizer import IGVCallBack
 
 
 logger = logging.getLogger(__name__)
+
+
+class Vocab(dict):
+    def __init__(self):
+        self.cur_idx = 0
+        self.idx_to_key = {}
+
+    def __getitem__(self, key):
+        if key not in self:
+            self[key] = self.cur_idx
+            self.idx_to_key[str(self.cur_idx)] = key
+            self.cur_idx += 1
+        return super().__getitem__(key)
+
+    def decode(self, key):
+        if type(key) is not str:
+            key = str(key)
+        return self.idx_to_key[key]
+
+    def decode_seq(self, seq):
+        return [self.decode(x) for x in seq]
 
 
 class ComposerWrapper(HuggingFaceModel):
@@ -439,9 +458,22 @@ def build_dataloader(
             if ref_id is not None:
                 encoding["ref_id"] = ref_id
                 encoding["alt_id"] = alt_id
-                for k, v in item.items():
-                    if type(v) is not str:
-                        encoding[k] = torch.tensor(v)
+            for k, v in item.items():
+                if type(v) is not str:
+                    encoding[k] = torch.tensor(v)
+                elif k == self.seq_idx:  # ignore seq
+                    continue
+                elif k == "chrom":
+                    if v in [str(x) for x in range(1, 30)]:
+                        encoding[k] = torch.tensor(int(v))
+                    else:
+                        encoding[k] = torch.tensor(-1)
+                elif k == "annotation_mask":
+                    encoding[k] = torch.tensor(v)  # [L] boolean mask
+                    # if k not in tokenizer.aux_mappings:  # cast assembly/chr to int
+                    # tokenizer.aux_mappings[k] = Vocab()
+                    # print(tokenizer.aux_mappings)
+                # encoding[k] = torch.tensor(tokenizer.aux_mappings[k][v])
 
             is_lowercase = torch.tensor(
                 [x.islower() for x in item[self.seq_idx]],
@@ -557,6 +589,8 @@ def run_training(cfg: DictConfig) -> None:
     num_trainable_params = sum(
         [x.numel() for x in model.parameters() if x.requires_grad]
     )
+    logger.info(f"Num params: {num_params:,}")
+    logger.info(f"Num trainable params: {num_trainable_params:,}")
 
     # Build optimizer
     optimizer = hydra.utils.instantiate(
@@ -586,13 +620,12 @@ def run_training(cfg: DictConfig) -> None:
         MemoryMonitor(),
         FlopMonitor(),
     ]
+    if cfg.model.get("log_bpreds", False):
+        callbacks.append(BPredMonitor())
 
     # Build loggers
     loggers = []
     if "wandb" in cfg.get("loggers", {}):
-        from dotenv import load_dotenv
-
-        load_dotenv(cfg.paths.env_path)
         api_key = cfg.loggers.wandb.api_key
         if api_key is None and "WANDB_API_KEY" not in os.environ:
             raise Exception(
@@ -640,6 +673,7 @@ def run_training(cfg: DictConfig) -> None:
         mlm=cfg.model.mlm,
         default_target_ratio=cfg.model.get("default_target_ratio", None),
     )
+
     val_loader = Evaluator(
         label="eval_split",
         dataloader=val_loader,
@@ -657,13 +691,17 @@ def run_training(cfg: DictConfig) -> None:
             mlm=cfg.model.mlm,
             default_target_ratio=None,
         )
+
         zeroshot_val_loader = Evaluator(
             label="maize_allele_freq",
             dataloader=zeroshot_val_loader,
             metric_names=["PearsonCorrCoef"],
         )
+        if cfg.model.get("log_bpreds", False):
+            callbacks.append(
+                IGVCallBack(target_eval_label="maize_allele_freq", log_only_N=200)
+            )
         eval_dataloaders = [val_loader, zeroshot_val_loader]
-        eval_dataloaders = None
 
     # Create trainer; see
     # https://docs.mosaicml.com/projects/composer/en/latest/api_reference/generated/composer.Trainer.html
