@@ -1,5 +1,5 @@
 data_local: null
-data_remote: "emarro/maize-allele-frequency-20k-val"
+data_remote: "emarro/maize_maf_with_annot_20k" #"emarro/maize-allele-frequency-20k-val"
 repeat_weight: 0.1
 num_workers: 1
 

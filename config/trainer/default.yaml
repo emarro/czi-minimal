@@ -24,8 +24,9 @@ precision: "amp_bf16"
 
 # path to the weights to load, e.g. for fine-tuning or for contiuning pre-training
 load_path: null
+autoresume: True
 
 # Checkpointing
 save_folder: "${paths.output_dir}/checkpoints/" # e.g. './{run_name}/ckpt' (local) or 's3://mybucket/mydir/{run_name}/ckpt' (remote)
-save_interval: "5000ba"
-save_num_checkpoints_to_keep: 1
+save_interval: "2500ba"
+save_num_checkpoints_to_keep: -1

@@ -11,7 +11,7 @@ global_train_batch_size: 2048
 #   PyTorch bugs, e.g. integer overflow.  In this case, please manually set device_train_microbatch_size explicitly
 #   to an integer instead.
 # device_train_microbatch_size: "auto"
-device_train_microbatch_size: 2
+device_train_microbatch_size: 512
 
 # Use float32 precision because bfloat16 (bf16) requires newer GPUs than the Tesla GPU
 # configured for this environment.  Using this precision requires Ampere or later generations,
@@ -24,8 +24,9 @@ precision: "amp_bf16"
 
 # path to the weights to load, e.g. for fine-tuning or for contiuning pre-training
 load_path: null
+autoresume: True
 
 # Checkpointing
 save_folder: "${paths.output_dir}/checkpoints/" # e.g. './{run_name}/ckpt' (local) or 's3://mybucket/mydir/{run_name}/ckpt' (remote)
-save_interval: "5000ba"
-save_num_checkpoints_to_keep: 1
+save_interval: "2500ba"
+save_num_checkpoints_to_keep: -1
