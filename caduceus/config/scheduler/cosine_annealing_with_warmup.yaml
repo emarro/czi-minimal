@@ -1,4 +1,0 @@
-_target_: composer.optim.scheduler.CosineAnnealingWithWarmupScheduler
-t_warmup: "1000ba"
-alpha_f: 0.02
-

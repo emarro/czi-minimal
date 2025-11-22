@@ -1,23 +1,14 @@
-[tool.setuptools]
-packages = ["caduceus", "hnet"]
-
 [project]
-name = "czi-minimal"
+name = "caduceus"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-requires-python = ">=3.12"
-dependencies = [
-    "composer[streaming]>=0.32.1",
-    "datasets>=4.4.1",
-    "hydra-core>=1.3.2",
-    "mamba-ssm<2.2.6.post3",
-    "mosaicml>=0.3.1",
-    "numpy<2.3.0",
-    "torch==2.7.0",
-    "caduceus @ ${PROJECT_ROOT}/caduceus",
-    "hnet @ ${PROJECT_ROOT}/hnet",
-    "flash-attn>=2.8.0.post2",
-    "wandb>=0.23.0",
-]
+requires-python = ">=3.10"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["caduceus*"]
+exclude = ["slurm_scripts*"]
 
