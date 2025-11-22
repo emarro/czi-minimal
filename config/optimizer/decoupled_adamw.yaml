@@ -1,0 +1,7 @@
+_target_: composer.optim.DecoupledAdamW
+lr: 2.0e-4
+betas: [0.9, 0.98]
+eps: 1.0e-6
+weight_decay: 1.0e-5
+
+
