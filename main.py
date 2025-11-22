@@ -626,9 +626,6 @@ def run_training(cfg: DictConfig) -> None:
     # Build loggers
     loggers = []
     if "wandb" in cfg.get("loggers", {}):
-        from dotenv import load_dotenv
-
-        load_dotenv(cfg.paths.env_path)
         api_key = cfg.loggers.wandb.api_key
         if api_key is None and "WANDB_API_KEY" not in os.environ:
             raise Exception(
