@@ -2,11 +2,11 @@
 
 import logging
 import os
-import random
-from pathlib import Path
-from typing import cast
+from typing import cast, Optional, Any
 
-import fire
+import hydra_setup  # register resolvers for hydra
+
+import hydra
 import torch
 from caduceus import CaduceusConfig, CaduceusForMaskedLM, CaduceusTokenizer
 from collections import namedtuple
@@ -46,7 +46,36 @@ from hnet.models.config_hnet import (
 from hnet.utils.tokenizers import ByteTokenizer
 
 
+from composer.models.tasks import ComposerClassifier
+from composer.profiler import JSONTraceHandler, cyclic_schedule
+from composer.profiler.profiler import Profiler
+
+from callbacks.flop_counter import FlopMonitor, BPredMonitor
+from callbacks.visualizer import IGVCallBack
+
+
 logger = logging.getLogger(__name__)
+
+
+class Vocab(dict):
+    def __init__(self):
+        self.cur_idx = 0
+        self.idx_to_key = {}
+
+    def __getitem__(self, key):
+        if key not in self:
+            self[key] = self.cur_idx
+            self.idx_to_key[str(self.cur_idx)] = key
+            self.cur_idx += 1
+        return super().__getitem__(key)
+
+    def decode(self, key):
+        if type(key) is not str:
+            key = str(key)
+        return self.idx_to_key[key]
+
+    def decode_seq(self, seq):
+        return [self.decode(x) for x in seq]
 
 
 class ComposerWrapper(HuggingFaceModel):
@@ -313,6 +342,9 @@ def build_dataloader(
     cfg: DictConfig,
     tokenizer,
     batch_size: int,
+    max_seq_len: int,
+    mlm: bool,
+    default_target_ratio: Optional[int] = None,
     split: str = "train",
     eval_only: bool = False,
 ):
@@ -324,7 +356,7 @@ def build_dataloader(
     )
     mask_seq = False
     if eval_only:
-        dataset_name_or_path = cfg.eval_remote
+        dataset_name_or_path = cfg.data_remote
         # split naming error
         split = "train"
         mask_seq = True
@@ -333,13 +365,17 @@ def build_dataloader(
         # data_files={split: os.path.join(cfg.data_local, f"{split}.txt")},
         split=split,
     )
+
+    cutoff = cfg.get("cutoff", None)
     # Filter sequences that remain with lots of "N"s
-    logger.info(f"Dataset length {len(dataset)}")
-    cutoff = 0.6
-    dataset = dataset.filter(
-        lambda batch: batch["seq"].count("N") < len(batch["seq"]) * cutoff
-    )
-    logger.info(f"Dataset length {len(dataset)}")
+    if cutoff is not None:
+        logger.info(f"Dataset length: {len(dataset)}")
+        dataset = dataset.filter(
+            lambda batch: batch["seq"].count("N") < len(batch["seq"]) * cutoff
+        )  # keep if percentage of N is less than cutoff
+        logger.info(
+            f"Dataset length after filter with cutoff {cutoff * 100}%: {len(dataset)}"
+        )
 
     class TokenizedDataset(Dataset):
         def __init__(
@@ -376,11 +412,11 @@ def build_dataloader(
             logger.info(f"Max sequence length: {max_length}")
 
             # Print first few sequences
-            logger.info("\n=== Example Sequences ===")
-            for i in range(min(3, len(dataset))):
-                logger.info(f"Example {i} text: {dataset[i][self.seq_idx][:50]}...")
-                logger.info(f"Example {i} ds: {self[i]}")
-            logger.info("========================\n")
+            # logger.info("\n=== Example Sequences ===")
+            # for i in range(min(3, len(dataset))):
+            #    logger.info(f"Example {i} text: {dataset[i][self.seq_idx][:50]}...")
+            #    logger.info(f"Example {i} ds: {self[i]}")
+            # logger.info("========================\n")
 
         def __len__(self):
             return len(self.dataset)
@@ -422,9 +458,22 @@ def build_dataloader(
             if ref_id is not None:
                 encoding["ref_id"] = ref_id
                 encoding["alt_id"] = alt_id
-                for k, v in item.items():
-                    if type(v) is not str:
-                        encoding[k] = torch.tensor(v)
+            for k, v in item.items():
+                if type(v) is not str:
+                    encoding[k] = torch.tensor(v)
+                elif k == self.seq_idx:  # ignore seq
+                    continue
+                elif k == "chrom":
+                    if v in [str(x) for x in range(1, 30)]:
+                        encoding[k] = torch.tensor(int(v))
+                    else:
+                        encoding[k] = torch.tensor(-1)
+                elif k == "annotation_mask":
+                    encoding[k] = torch.tensor(v)  # [L] boolean mask
+                    # if k not in tokenizer.aux_mappings:  # cast assembly/chr to int
+                    # tokenizer.aux_mappings[k] = Vocab()
+                    # print(tokenizer.aux_mappings)
+                # encoding[k] = torch.tensor(tokenizer.aux_mappings[k][v])
 
             is_lowercase = torch.tensor(
                 [x.islower() for x in item[self.seq_idx]],
@@ -459,18 +508,18 @@ def build_dataloader(
                 encoding["input_ids"] = encoding["input_ids"][:-1]
 
             # Print detailed info for first few batches
-            if idx < 0:
-                logger.info(f"\n=== Example {idx} Details ===")
-                logger.info(f"Raw text length: {len(item[self.seq_idx])}")
-                logger.info(f"Raw text: {item[self.seq_idx][:50]}...")
-                logger.info(f"Input IDs length: {len(encoding['input_ids'])}")
-                logger.info(f"Input IDs: {encoding['input_ids'][:50]}...")
-                logger.info(f"DNA token mask: {valid_dna_tokens[:50]}...")
-                logger.info(f"Labels: {labels[:50]}")
-                logger.info(
-                    f"Number of DNA tokens to predict: {valid_dna_tokens.sum()}"
-                )
-                logger.info("========================\n")
+            # if idx < 0:
+            # logger.info(f"\n=== Example {idx} Details ===")
+            # logger.info(f"Raw text length: {len(item[self.seq_idx])}")
+            # logger.info(f"Raw text: {item[self.seq_idx][:50]}...")
+            # logger.info(f"Input IDs length: {len(encoding['input_ids'])}")
+            # logger.info(f"Input IDs: {encoding['input_ids'][:50]}...")
+            # logger.info(f"DNA token mask: {valid_dna_tokens[:50]}...")
+            # logger.info(f"Labels: {labels[:50]}")
+            # logger.info(
+            #    f"Number of DNA tokens to predict: {valid_dna_tokens.sum()}"
+            # )
+            # logger.info("========================\n")
 
             # Add labels to the encoding
             encoding["labels"] = labels if self.mlm else labels[1:]
@@ -486,45 +535,47 @@ def build_dataloader(
     tokenized_dataset = TokenizedDataset(
         dataset,
         tokenizer,
-        cfg.max_seq_len,
+        max_seq_len,
         cfg.repeat_weight,
         mask_seq=mask_seq,
-        default_target_ratio=cfg.default_target_ratio,
-        mlm=cfg.mlm,
+        default_target_ratio=default_target_ratio,
+        mlm=mlm,
     )
     sampler = dist.get_sampler(tokenized_dataset, shuffle=(split == "train"))
     collate_fn = (
         DataCollatorForLanguageModeling(
             tokenizer=tokenizer,
-            mlm=cfg.mlm,
+            mlm=mlm,
             mlm_probability=cfg.mlm_probability if not mask_seq else 0.0,
             mask_replace_prob=cfg.mask_replace_prob,
             random_replace_prob=cfg.random_replace_prob,
         )
-        if cfg.mlm
+        if (mlm and not eval_only)
         else None
     )  # Collator overwrites the labels from __getitem__, disable if not mlm!
 
     return DataLoader(
         tokenized_dataset,
         batch_size=batch_size,
-        num_workers=cfg.train_loader.num_workers,
+        num_workers=cfg.num_workers,
         collate_fn=collate_fn,
         sampler=sampler,
         pin_memory=True,
     )
 
 
-def run_training(config_path: str = "config.yaml"):
+@hydra.main(version_base=None, config_path="config", config_name="train")
+def run_training(cfg: DictConfig) -> None:
     """Train the model using the specified config."""
     logger.info("Starting training...")
+    print(cfg)
 
     # Load config
-    cfg = OmegaConf.load(config_path)
+    # cfg = OmegaConf.load(config_path)
     cfg = cast(DictConfig, cfg)
 
     # Set seed for reproducibility
-    reproducibility.seed_all(cfg.seed)
+    reproducibility.seed_all(cfg.trainer.seed)
 
     # Initialize distributed training
     if not dist.is_initialized():
@@ -532,109 +583,171 @@ def run_training(config_path: str = "config.yaml"):
 
     # Build model
     logger.info("Building model...")
-    model = build_model(cfg)
+    model = hydra.utils.instantiate(cfg.model)
+    # model = build_model(cfg)
+    num_params = sum([x.numel() for x in model.parameters()])
+    num_trainable_params = sum(
+        [x.numel() for x in model.parameters() if x.requires_grad]
+    )
+    logger.info(f"Num params: {num_params:,}")
+    logger.info(f"Num trainable params: {num_trainable_params:,}")
 
     # Build optimizer
-    optimizer = DecoupledAdamW(
+    optimizer = hydra.utils.instantiate(
+        cfg.optimizer,
         model.parameters(),
-        lr=cfg.optimizer.lr,
-        betas=cfg.optimizer.betas,
-        eps=cfg.optimizer.eps,
-        weight_decay=cfg.optimizer.weight_decay,
+        # lr=cfg.optimizer.lr,
+        # betas=cfg.optimizer.betas,
+        # eps=cfg.optimizer.eps,
+        # weight_decay=cfg.optimizer.weight_decay,
     )
 
     # Build scheduler
-    scheduler = CosineAnnealingWithWarmupScheduler(
-        t_warmup=cfg.scheduler.t_warmup, alpha_f=cfg.scheduler.alpha_f
-    )
+    scheduler = hydra.utils.instantiate(cfg.scheduler)
 
     # Build callbacks
     callbacks = [
         LRMonitor(),
         SpeedMonitor(window_size=100),
-        CheckpointSaver(weights_only=True),
+        CheckpointSaver(
+            weights_only=False,
+            folder=cfg.trainer.get("save_folder"),
+            save_interval=cfg.trainer.get("save_interval", "1000ba"),
+            num_checkpoints_to_keep=cfg.trainer.get("save_num_checkpoints_to_keep", -1),
+            overwrite=cfg.trainer.get("save_overwrite", False),
+        ),
         RuntimeEstimator(),
         MemoryMonitor(),
+        FlopMonitor(),
     ]
+    if cfg.model.get("log_bpreds", False):
+        callbacks.append(BPredMonitor())
 
     # Build loggers
     loggers = []
     if "wandb" in cfg.get("loggers", {}):
-        loggers.append(WandBLogger(**cfg.loggers.wandb))
+        api_key = cfg.loggers.wandb.api_key
+        if api_key is None and "WANDB_API_KEY" not in os.environ:
+            raise Exception(
+                "WANDB logger instantiated by not API key was provided, make sure .env is set up properly"
+            )
+        os.environ["WANDB_API_KEY"] = api_key
+        dict_cfg: dict[str, Any] = OmegaConf.to_container(cfg, resolve=True)
+        dict_cfg["num_params"] = num_params
+        dict_cfg["num_trainable_params"] = num_trainable_params
+        loggers.append(
+            WandBLogger(
+                project=cfg.loggers.wandb.project,
+                entity=cfg.loggers.wandb.entity,
+                tags=cfg.loggers.wandb.tags
+                if cfg.loggers.wandb.tags is not None
+                else None,
+                init_kwargs={
+                    "config": dict_cfg,
+                    "config_exclude_keys": [
+                        "loggers"
+                    ],  # dont include loggers in config, might leak api keys
+                },
+            )
+        )
+        # loggers[-1].log_hyperparameters(cfg)
 
     # Build data loaders
     logger.info("Building data loaders...")
     train_loader = build_dataloader(
-        cfg,
+        cfg.dataset,
         model.tokenizer,
-        cfg.global_train_batch_size // dist.get_world_size(),
+        cfg.trainer.global_train_batch_size // dist.get_world_size(),
         split="train",
+        max_seq_len=cfg.model.max_seq_len,
+        mlm=cfg.model.mlm,
+        default_target_ratio=cfg.model.get("default_target_ratio", None),
+    )
+    val_loader = None
+    val_loader = build_dataloader(
+        cfg.dataset,
+        model.tokenizer,
+        cfg.trainer.global_train_batch_size // dist.get_world_size(),
+        split="validation",
+        max_seq_len=cfg.model.max_seq_len,
+        mlm=cfg.model.mlm,
+        default_target_ratio=cfg.model.get("default_target_ratio", None),
     )
 
-    val_loader = None
-    if cfg.data_local is not None:
-        if os.path.exists(os.path.join(cfg.data_local, "val.txt")):
-            val_loader = build_dataloader(
-                cfg,
-                model.tokenizer,
-                cfg.global_train_batch_size // dist.get_world_size(),
-                split="val",
-            )
-    else:
-        val_loader = build_dataloader(
-            cfg,
-            model.tokenizer,
-            cfg.global_train_batch_size // dist.get_world_size(),
-            split="validation",
-        )
     val_loader = Evaluator(
         label="eval_split",
         dataloader=val_loader,
         metric_names=["EvalLoss", "ARLoss", "RatioLoss", "Accuracy"],
     )
     eval_dataloaders = [val_loader]
-    if cfg.eval_remote is not None:
+    if cfg.eval_dataset is not None:
         zeroshot_val_loader = build_dataloader(
-            cfg,
+            cfg.eval_dataset,
             model.tokenizer,
-            cfg.global_train_batch_size // dist.get_world_size(),
+            cfg.trainer.global_train_batch_size // dist.get_world_size(),
             split="validation",
             eval_only=True,
+            max_seq_len=cfg.model.max_seq_len,
+            mlm=cfg.model.mlm,
+            default_target_ratio=None,
         )
+
         zeroshot_val_loader = Evaluator(
             label="maize_allele_freq",
             dataloader=zeroshot_val_loader,
             metric_names=["PearsonCorrCoef"],
         )
+        if cfg.model.get("log_bpreds", False):
+            callbacks.append(
+                IGVCallBack(target_eval_label="maize_allele_freq", log_only_N=200)
+            )
         eval_dataloaders = [val_loader, zeroshot_val_loader]
 
     # Create trainer; see
     # https://docs.mosaicml.com/projects/composer/en/latest/api_reference/generated/composer.Trainer.html
+    print(f"Eval interval: {cfg.trainer.eval_interval}")
+    composer_trace_dir = "composer_profiler"
+    torch_trace_dir = "torch_profiler"
+
     trainer = Trainer(
         model=model,
         train_dataloader=train_loader,
         eval_dataloader=eval_dataloaders,
         optimizers=optimizer,
         schedulers=scheduler,
-        max_duration=cfg.max_duration,
-        eval_interval=cfg.get("eval_interval", "1000ba"),
+        max_duration=cfg.trainer.max_duration,
+        eval_interval=cfg.trainer.eval_interval,
         callbacks=callbacks,
         loggers=loggers,
-        precision=cfg.precision,
-        device_train_microbatch_size=cfg.device_train_microbatch_size,
-        save_folder=cfg.get("save_folder"),
-        save_interval=cfg.get("save_interval", "1000ba"),
-        save_num_checkpoints_to_keep=cfg.get("save_num_checkpoints_to_keep", -1),
-        run_name=cfg.get("run_name", "caduceus-train"),
+        precision=cfg.trainer.precision,
+        device_train_microbatch_size=cfg.trainer.device_train_microbatch_size,
+        # save_folder=cfg.trainer.get("save_folder"),
+        # ave_interval=cfg.trainer.get("save_interval", "1000ba"),
+        # ave_num_checkpoints_to_keep=cfg.trainer.get(
+        #   "save_num_checkpoints_to_keep", -1
+        # ,
+        run_name=cfg.run_name,
+        autoresume=cfg.trainer.autoresume,
+        # profiler=Profiler(
+        #    trace_handlers=[
+        #        JSONTraceHandler(folder=composer_trace_dir, overwrite=True)
+        # ],
+        #    schedule=cyclic_schedule(
+        #        wait=1,
+        #        warmup=1,
+        #        active=3,
+        #        repeat=1,
+        #    ),
+        #    torch_prof_folder=torch_trace_dir,
+        #    torch_prof_overwrite=True,
+        #    torch_prof_memory_filename=None,
+        #    torch_prof_with_stack=True,
+        # ),
     )
 
     # Start training
-    trainer.fit()
+    trainer.fit(reset_time=cfg.trainer.get("reset_time", False))
 
 
 if __name__ == "__main__":
-    fire.Fire(
-        {
-            "run_training": run_training,
-        }
-    )
+    run_training()
