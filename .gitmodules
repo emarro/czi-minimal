@@ -1,6 +1,3 @@
 [submodule "hnet"]
 	path = hnet
 	url = git@github.com:emarro/hnet.git
-[submodule "caduceus"]
-	path = caduceus
-	url = https://github.com/emarro/caduceus.git
