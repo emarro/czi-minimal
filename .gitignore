@@ -208,3 +208,8 @@ __marimo__/
 
 # Hydra
 outputs/*
+# wandb logs
+wandb/*
+
+# VS Code settings from interactive dev sessions
+.vscode/*
