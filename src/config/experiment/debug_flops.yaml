@@ -3,7 +3,7 @@
 defaults:
   - override /model: hnet
   - override /trainer: fixed_batch
-  - override /loggers: wandb
+  #- override /loggers: wandb
 
 
 
