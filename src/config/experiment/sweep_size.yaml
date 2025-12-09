@@ -13,11 +13,6 @@ hydra:
     # hyperparams to search over
     params:
       model.default_target_ratio: 2, 3, 5, 10, 15, null
-      model.d_model: 
-        - [768, 768] #d_model of each stage (matches stages from arch_layout)
-        - [1024, 1024]
-        - [768, 512]
-
 
 
 
