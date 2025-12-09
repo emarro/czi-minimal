@@ -21,6 +21,6 @@ trainer:
   autoresume: False
   reset_time: True
 
-loggers:
-  wandb:
-    project: "Composer Debug"
+#loggers:
+#  wandb:
+#    project: "Composer Debug"

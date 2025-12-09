@@ -4,6 +4,8 @@ defaults:
   - dataset: angiosperm_16
   # eval dataset(s)
   - eval_dataset: maize_allele_freq
+  # datasets to get boundaries for at certain intervals
+  - maize_dataset: maize_chr1
   # loggers to use (wandb)
   - loggers: null
   # callbacks to use with trainer (not implemented)

@@ -52,6 +52,7 @@ from composer.profiler.profiler import Profiler
 
 from callbacks.flop_counter import FlopMonitor, BPredMonitor
 from callbacks.visualizer import IGVCallBack
+from callbacks.logger import ChrChunker
 
 
 logger = logging.getLogger(__name__)
@@ -347,6 +348,7 @@ def build_dataloader(
     default_target_ratio: Optional[int] = None,
     split: str = "train",
     eval_only: bool = False,
+    mask_seq: bool = False,
 ):
     """Build data loader for masked language modeling."""
 
@@ -359,7 +361,7 @@ def build_dataloader(
         dataset_name_or_path = cfg.data_remote
         # split naming error
         split = "train"
-        mask_seq = True
+        mask_seq = mask_seq
     dataset = load_dataset(
         dataset_name_or_path,
         # data_files={split: os.path.join(cfg.data_local, f"{split}.txt")},
@@ -687,6 +689,7 @@ def run_training(cfg: DictConfig) -> None:
             cfg.trainer.global_train_batch_size // dist.get_world_size(),
             split="validation",
             eval_only=True,
+            mask_seq=True,
             max_seq_len=cfg.model.max_seq_len,
             mlm=cfg.model.mlm,
             default_target_ratio=None,
@@ -702,6 +705,36 @@ def run_training(cfg: DictConfig) -> None:
                 IGVCallBack(target_eval_label="maize_allele_freq", log_only_N=200)
             )
         eval_dataloaders = [val_loader, zeroshot_val_loader]
+
+    if cfg.maize_dataset is not None and cfg.model.get("log_bpreds", False):
+        maize_val_loader = build_dataloader(
+            cfg.maize_dataset,
+            model.tokenizer,
+            cfg.trainer.global_train_batch_size // dist.get_world_size(),
+            split="train",
+            eval_only=True,
+            mask_seq=False,
+            max_seq_len=cfg.model.max_seq_len,
+            mlm=cfg.model.mlm,
+            default_target_ratio=None,
+        )
+
+        maize_val_loader = Evaluator(
+            label="maize_chr1",
+            dataloader=maize_val_loader,
+            eval_interval=cfg.maize_dataset.eval_interval,
+            metric_names=[],
+        )
+        eval_dataloaders = []
+        eval_dataloaders.append(maize_val_loader)
+        if not os.path.exists(cfg.maize_dataset.save_dir):
+            os.makedirs(cfg.maize_dataset.save_dir)
+
+        callbacks.append(
+            ChrChunker(
+                target_eval_label="maize_chr1", save_dir=cfg.maize_dataset.save_dir
+            )
+        )
 
     # Create trainer; see
     # https://docs.mosaicml.com/projects/composer/en/latest/api_reference/generated/composer.Trainer.html

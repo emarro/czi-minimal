@@ -1,0 +1,6 @@
+data_local: null
+data_remote: "emarro/maize_chr1_512" #"emarro/maize-allele-frequency-20k-val"
+repeat_weight: 0.1
+num_workers: 1
+eval_interval: "1ep" #chunk and save boundaries every batch
+save_dir: "${paths.output_dir}/checkpoints/"  #folder to save outputs to
