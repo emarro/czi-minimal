@@ -391,13 +391,14 @@ source = { directory = "src/caduceus" }
 
 [[package]]
 name = "causal-conv1d"
-version = "1.5.0.post8"
-source = { git = "https://github.com/Dao-AILab/causal-conv1d.git?rev=e940ead2fd962c56854455017541384909ca669f#e940ead2fd962c56854455017541384909ca669f" }
+version = "1.5.3.post1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "ninja" },
     { name = "packaging" },
     { name = "torch" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/64/cb/104778c728dc3d5ea3bf65a484e3a4cdbe894bdaa2586320e2f61d007b8c/causal_conv1d-1.5.3.post1.tar.gz", hash = "sha256:aba1b717484472d0b2f2e40520a1c03f35fe5155555bd753d1c324afc56ba468", size = 24198, upload-time = "2025-10-10T10:16:23.921Z" }
 
 [[package]]
 name = "certifi"
@@ -779,6 +780,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "caduceus" },
+    { name = "causal-conv1d" },
     { name = "composer", extra = ["streaming"] },
     { name = "datasets" },
     { name = "flash-attn" },
@@ -794,6 +796,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "caduceus", directory = "src/caduceus" },
+    { name = "causal-conv1d", specifier = ">=1.5.3.post1" },
     { name = "composer", extras = ["streaming"], specifier = ">=0.32.1" },
     { name = "datasets", specifier = ">=4.4.1" },
     { name = "flash-attn", specifier = ">=2.8.0.post2" },
@@ -1211,7 +1214,6 @@ name = "hnet"
 version = "0.0.1"
 source = { directory = "src/hnet" }
 dependencies = [
-    { name = "causal-conv1d" },
     { name = "einops" },
     { name = "flash-attn" },
     { name = "mamba-ssm" },
@@ -1224,14 +1226,13 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "causal-conv1d", git = "https://github.com/Dao-AILab/causal-conv1d.git?rev=e940ead2fd962c56854455017541384909ca669f" },
     { name = "einops" },
     { name = "flash-attn", specifier = "==2.8.0.post2" },
-    { name = "mamba-ssm", git = "https://github.com/state-spaces/mamba.git?rev=a6a1dae6efbf804c9944a0c2282b437deb4886d8" },
+    { name = "mamba-ssm", specifier = "==2.2.6.post3" },
     { name = "omegaconf" },
     { name = "optree" },
     { name = "regex" },
-    { name = "torch", specifier = ">=2.5.1" },
+    { name = "torch", specifier = "==2.7.0" },
     { name = "triton", specifier = ">=3.2.0" },
 ]
 
@@ -1435,8 +1436,8 @@ wheels = [
 
 [[package]]
 name = "mamba-ssm"
-version = "2.2.4"
-source = { git = "https://github.com/state-spaces/mamba.git?rev=a6a1dae6efbf804c9944a0c2282b437deb4886d8#a6a1dae6efbf804c9944a0c2282b437deb4886d8" }
+version = "2.2.6.post3"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "einops" },
     { name = "ninja" },
@@ -1446,6 +1447,7 @@ dependencies = [
     { name = "transformers" },
     { name = "triton" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/b6/0c/9373a469ff7a33bdd0644e55fa45165ba3900274dcf7fe9f10ccc232aef9/mamba_ssm-2.2.6.post3.tar.gz", hash = "sha256:826a3cdb651959f191dac64502f8a29627d9116fe6bb7c57e4f562da1aea7bf3", size = 113913, upload-time = "2025-10-10T06:00:44.939Z" }
 
 [[package]]
 name = "markdown-it-py"

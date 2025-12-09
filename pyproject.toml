@@ -17,8 +17,8 @@ dependencies = [
     "hnet @ ${PROJECT_ROOT}/src/hnet",
     "caduceus @ ${PROJECT_ROOT}/src/caduceus",
     "zstandard>=0.25.0",
+    "causal-conv1d>=1.5.3.post1",
 ]
 
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true }]
-
