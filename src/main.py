@@ -357,7 +357,6 @@ def build_dataloader(
     dataset_name_or_path = (
         cfg.data_local if cfg.data_local is not None else cfg.data_remote
     )
-    mask_seq = False
     if eval_only:
         dataset_name_or_path = cfg.data_remote
         # split naming error
