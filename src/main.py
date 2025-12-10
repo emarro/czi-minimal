@@ -83,6 +83,7 @@ class ComposerWrapper(HuggingFaceModel):
     def __init__(self, *args, mlm=True, **kwargs):
         super().__init__(*args, **kwargs)
         self.val_pcc = PearsonCorrCoef()
+        self.val_pcc.tag = ""
         self.val_loss = MeanMetric()
         self.val_loss.tag = ""
         self.train_ar_loss = RunningMean()
@@ -169,7 +170,7 @@ class ComposerWrapper(HuggingFaceModel):
         """
         # TODO: Redo by shoving all the evals for each split into a collection class?
         if (
-            len(batch.keys()) == 5 or "ref_id" not in batch
+            metric.tag is not None and (len(batch.keys()) == 5 or "ref_id" not in batch)
         ):  # not in the zero-shot eval task
             val = None
             if metric.tag == "ar":
