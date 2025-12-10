@@ -1,7 +1,7 @@
 # @package _global_
 # let the experiment node modify configs globally
 defaults:
-  - override /model: hnet
+  - override /model: hnet_small
   - override /trainer: fixed_batch
   - override /loggers: wandb
 
@@ -24,7 +24,7 @@ optimizer:
 
 trainer:
   device_train_microbatch_size: 256 #depends on the amount of GPU mem available
-  max_duration: "20ep"
+  max_duration: "40ep"
 
 loggers:
   wandb:
