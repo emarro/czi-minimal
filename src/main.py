@@ -635,7 +635,12 @@ def run_training(cfg: DictConfig) -> None:
             )
         if "WANDB_API_KEY" not in os.environ:
             os.environ["WANDB_API_KEY"] = api_key
-        print(f"Logging in with key {os.environ["WANDB_API_KEY"]}")
+        import wandb
+        try:
+            wandb.login()
+        except Exception as e:
+            print(f"Logging in with key {os.environ["WANDB_API_KEY"]} failed, error {e}")
+            raise Exception(e)
         dict_cfg: dict[str, Any] = OmegaConf.to_container(cfg, resolve=True)
         dict_cfg["num_params"] = num_params
         dict_cfg["num_trainable_params"] = num_trainable_params
