@@ -7,4 +7,5 @@ random_replace_prob: 0.10 #prob of replacing a masked token with another token i
 cutoff: 0.6 # percentage of 'N's not allowed in dataset
 repeat_weight: 0.10 #downweight losses for soft-masked DNA regions
 num_workers: 2 #num workers to load dataset
+eval_interval: "250ba"
 

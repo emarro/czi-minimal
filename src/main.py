@@ -680,6 +680,7 @@ def run_training(cfg: DictConfig) -> None:
         label="eval_split",
         dataloader=val_loader,
         metric_names=["EvalLoss", "ARLoss", "RatioLoss", "Accuracy"],
+        eval_interval = cfg.dataset.eval_interval,
     )
     eval_dataloaders = [val_loader]
     if cfg.eval_dataset is not None:
@@ -699,6 +700,7 @@ def run_training(cfg: DictConfig) -> None:
             label="maize_allele_freq",
             dataloader=zeroshot_val_loader,
             metric_names=["PearsonCorrCoef"],
+            eval_interval = cfg.eval_dataset.eval_interval,
         )
         if cfg.model.get("log_bpreds", False):
             callbacks.append(
