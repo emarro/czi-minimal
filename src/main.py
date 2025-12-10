@@ -633,7 +633,9 @@ def run_training(cfg: DictConfig) -> None:
             raise Exception(
                 "WANDB logger instantiated by not API key was provided, make sure .env is set up properly"
             )
-        os.environ["WANDB_API_KEY"] = api_key
+        if "WANDB_API_KEY" not in os.environ:
+            os.environ["WANDB_API_KEY"] = api_key
+        print(f"Logging in with key {os.environ["WANDB_API_KEY"]}")
         dict_cfg: dict[str, Any] = OmegaConf.to_container(cfg, resolve=True)
         dict_cfg["num_params"] = num_params
         dict_cfg["num_trainable_params"] = num_trainable_params
