@@ -727,7 +727,6 @@ def run_training(cfg: DictConfig) -> None:
             eval_interval=cfg.maize_dataset.eval_interval,
             metric_names=[],
         )
-        eval_dataloaders = []
         eval_dataloaders.append(maize_val_loader)
         if not os.path.exists(cfg.maize_dataset.save_dir):
             os.makedirs(cfg.maize_dataset.save_dir)
