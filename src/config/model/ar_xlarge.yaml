@@ -4,7 +4,7 @@ _modelstr_: "hnet_${model.arch_layout}_N=${model.default_target_ratio}_D=${model
 
 arch_layout: ["M23"] #architecture for DNA from Table 7 with best PPL in HNet paper
 d_model: [1536] #d_model of each stage (matches stages from arch_layout)
-d_intermediate: [2048] # size of FFN sizes for MLP corresponding to above
+d_intermediate: [2304] # size of FFN sizes for MLP corresponding to above
 vocab_size: 16
 ssm_cfg:
   chunk_size: 256
@@ -12,8 +12,8 @@ ssm_cfg:
   d_state: 128
   expand: 2
 attn_cfg:
-  num_heads: [8, 8]
-  rotary_emb_dim: [16, 32]
+  num_heads: [8]
+  rotary_emb_dim: [32]
   window_size: [-1, -1]
 tie_embeddings: False
 
