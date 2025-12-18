@@ -54,6 +54,7 @@ class HNet(nn.Module):
     ) -> None:
         super().__init__()
         factory_kwargs = {"device": device, "dtype": dtype}
+        print(f"Hnet config: {config}")
 
         self.stage_idx = stage_idx
         self.d_model = config.d_model[stage_idx]
@@ -99,6 +100,9 @@ class HNet(nn.Module):
                 flops_counter=flops_counter,
                 **_pos_idx_dict,
                 **factory_kwargs,
+            )
+            print(
+                f"Adding submodule {_name} with config {config} at stage {_stage_idx}: {_sub_model}"
             )
             self.add_module(_name, _sub_model)
 

@@ -65,7 +65,7 @@ class Isotropic(nn.Module):
         for _ in range(stage_idx):
             arch_layout = arch_layout[1]
         arch_layout = arch_layout[pos_idx]
-        layout_parse = re.findall(r"([mMtT])(\d+)", arch_layout)
+        layout_parse = re.findall(r"([mMtTcC])(\d+)", arch_layout)
 
         layers = []
         layer_idx = 0
@@ -74,7 +74,7 @@ class Isotropic(nn.Module):
         # self.height counts the number of things that get added to the residual stream
         self.height = 0
         for arch, n_layer in layout_parse:
-            assert arch in ("m", "M", "t", "T")
+            assert arch in ("m", "M", "t", "T", "c", "C")
             assert n_layer.isdigit()
             layers += [
                 create_block(
@@ -154,7 +154,7 @@ class Isotropic(nn.Module):
 
         residual = None
         for layer, arch in zip(self.layers, self.arch_full):
-            if arch in ("m", "M"):
+            if arch in ("m", "M", "c", "C"):
                 layer_mixer_kwargs = ssm_mixer_kwargs
                 if hidden_states.dim() == 2:
                     hidden_states = hidden_states.unsqueeze(0)

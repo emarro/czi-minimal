@@ -7,7 +7,10 @@ from torch import nn, Tensor
 
 from flash_attn.ops.triton.layer_norm import RMSNorm
 from mamba_ssm.modules.mamba2 import Mamba2
-from caduceus import Caduceus
+
+# TODO: this is just the bimamba wrapper, still need RCPS
+from caduceus import BiMambaWrapper as Caduceus
+from caduceus import CaduceusConfig
 
 from .mha import CausalMHA
 from .mlp import SwiGLU
@@ -56,6 +59,10 @@ class CaduceusWrapper(Caduceus):
 
     def __init__(self, *args, flops_counter=None, **kwargs):
         super().__init__(*args, **kwargs)
+        cad_cfg = kwargs["config"]
+        self.d_model = cad_cfg.d_model
+        self.expand = cad_cfg.layer_cfg.mamba_cfg.ssm_cfg["expand"]
+        self.d_state = cad_cfg.layer_cfg.mamba_cfg.ssm_cfg["d_state"]
         self.flops_counter = flops_counter
 
     def forward(self, *args, num_tokens, **kwargs):
@@ -101,6 +108,7 @@ def create_block(
     factory_kwargs = {"device": device, "dtype": dtype}
 
     # Mixer
+    print(f" Layer idx {layer_idx} arch: {arch}")
     if arch in ("t", "T"):
         mixer_cls = partial(
             CausalMHA,
@@ -118,10 +126,17 @@ def create_block(
             flops_counter=flops_counter,
         )
     elif arch in ("c", "C"):
+        caduceus_config = {
+            "bidirectional": True,
+            "bidirectional_strategy": "add",
+            "d_model": d_model,
+            "layer_cfg": {"mamba_cfg": {"version": "v2", "ssm_cfg": ssm_cfg}},
+        }
+        caduceus_config = CaduceusConfig(**caduceus_config)
         mixer_cls = partial(
             CaduceusWrapper,
-            **ssm_cfg,
             **factory_kwargs,
+            config=caduceus_config,
             layer_idx=layer_idx,
             flops_counter=flops_counter,
         )
@@ -130,13 +145,13 @@ def create_block(
         raise NotImplementedError
 
     # MLP
-    if arch in ("T", "M"):
+    if arch in ("T", "M", "C"):
         mlp_cls = partial(
             SwiGLU,
             d_intermediate=d_intermediate,
             **factory_kwargs,
         )
-    elif arch in ("t", "m"):
+    elif arch in ("t", "m", "c"):
         mlp_cls = nn.Identity
     else:
         raise NotImplementedError
