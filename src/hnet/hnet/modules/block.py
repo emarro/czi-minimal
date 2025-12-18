@@ -7,6 +7,7 @@ from torch import nn, Tensor
 
 from flash_attn.ops.triton.layer_norm import RMSNorm
 from mamba_ssm.modules.mamba2 import Mamba2
+from caduceus import Caduceus
 
 from .mha import CausalMHA
 from .mlp import SwiGLU
@@ -30,6 +31,42 @@ class Mamba2Wrapper(Mamba2):
                 * self.expand
                 * self.d_state
             )
+            self.flops_counter.add_flops(num_flops)
+        return super().forward(*args, **kwargs)
+
+    def step(self, hidden_states, inference_params):
+        # Don't use _get_states_from_cache because we want to assert that they exist
+        conv_state, ssm_state = inference_params.key_value_memory_dict[
+            self.layer_idx
+        ]  # init class of Mamba2 accepts layer_idx
+        result, conv_state, ssm_state = super().step(
+            hidden_states, conv_state, ssm_state
+        )
+
+        # Update the state cache in-place
+        inference_params.key_value_memory_dict[self.layer_idx][0].copy_(conv_state)
+        inference_params.key_value_memory_dict[self.layer_idx][1].copy_(ssm_state)
+        return result
+
+
+class CaduceusWrapper(Caduceus):
+    """
+    Mamba2 wrapper class that has the same inference interface as the CausalMHA class.
+    """
+
+    def __init__(self, *args, flops_counter=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.flops_counter = flops_counter
+
+    def forward(self, *args, num_tokens, **kwargs):
+        if self.flops_counter is not None:
+            num_flops = (
+                6
+                * int(num_tokens.sum().item())
+                * self.d_model
+                * self.expand
+                * self.d_state
+            ) * 2  # Approximate as just 2 passes of caducues
             self.flops_counter.add_flops(num_flops)
         return super().forward(*args, **kwargs)
 
@@ -80,6 +117,15 @@ def create_block(
             layer_idx=layer_idx,
             flops_counter=flops_counter,
         )
+    elif arch in ("c", "C"):
+        mixer_cls = partial(
+            CaduceusWrapper,
+            **ssm_cfg,
+            **factory_kwargs,
+            layer_idx=layer_idx,
+            flops_counter=flops_counter,
+        )
+
     else:
         raise NotImplementedError
 
