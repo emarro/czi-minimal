@@ -99,8 +99,8 @@ class ComposerWrapper(HuggingFaceModel):
             metric: torchmetrics.Metric the metric we're updating
         """
         # TODO: Redo by shoving all the evals for each split into a collection class?
-        if (
-            (metric.tag is not None) and (len(batch.keys()) == 5 or "ref_id" not in batch)
+        if (metric.tag is not None) and (
+            len(batch.keys()) == 5 or "ref_id" not in batch
         ):  # not in the zero-shot eval task
             val = None
             if metric.tag == "ar":
@@ -111,11 +111,15 @@ class ComposerWrapper(HuggingFaceModel):
                 B, L, V = outputs.logits.shape
                 preds = outputs.logits.softmax(dim=-1).argmax(dim=-1)
                 labels = batch["labels"]
+                preds = preds.view(-1)
+                labels = labels.view(-1)
                 if self.mlm:
                     # if MLM only count
-                    preds[labels == -100] = 0
-                    labels[labels == -100] = 0
-                metric.update(preds.view(-1), labels.view(-1))
+                    preds = preds[labels != -100]
+                    labels = labels[labels != -100]
+                    # preds[labels == -100] = 0
+                    # labels[labels == -100] = 0
+                metric.update(preds, labels)
                 return
             else:
                 val = outputs.loss
