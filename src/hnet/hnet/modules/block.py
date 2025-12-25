@@ -3,7 +3,7 @@
 from functools import partial
 from typing import Optional
 
-from torch import nn, Tensor
+from torch import nn, Tensor, cat
 
 from flash_attn.ops.triton.layer_norm import RMSNorm
 from mamba_ssm.modules.mamba2 import Mamba2
@@ -158,15 +158,24 @@ def create_block(
 
     # Normalization
     norm_cls = partial(RMSNorm, eps=norm_epsilon, **factory_kwargs)
-
-    block = Block(
-        d_model,
-        mixer_cls,
-        mlp_cls,
-        norm_cls=norm_cls,
-        residual_in_fp32=residual_in_fp32,
-        flops_counter=flops_counter,
-    )
+    if arch in ("c", "C"):
+        block = RCPSBlock(
+            d_model,
+            mixer_cls,
+            mlp_cls,
+            norm_cls=norm_cls,
+            residual_in_fp32=residual_in_fp32,
+            flops_counter=flops_counter,
+        )
+    else:
+        block = Block(
+            d_model,
+            mixer_cls,
+            mlp_cls,
+            norm_cls=norm_cls,
+            residual_in_fp32=residual_in_fp32,
+            flops_counter=flops_counter,
+        )
     return block
 
 
@@ -275,3 +284,116 @@ class Block(nn.Module):
             hidden_states = self.mlp(hidden_states)
 
         return hidden_states, residual
+
+
+class RCPSBlock(Block):
+    """
+    RCPS version of a block (taken from Caducues)
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(
+        self,
+        hidden_states: Tensor,
+        residual: Optional[Tensor] = None,
+        inference_params=None,
+        mixer_kwargs=None,
+        num_tokens=None,
+    ):
+        ##################################################
+        # ----------- Split Norm 1 into fwd and rc -------#
+        ##################################################
+        hidden_states_fwd, residual_fwd = self.norm1(
+            hidden_states[..., hidden_states.shape[-1] // 2 :],
+            residual=residual[..., hidden_states.shape[-1] // 2 :]
+            if residual is not None
+            else None,
+            prenorm=True,
+            residual_in_fp32=self.residual_in_fp32,
+        )
+
+        hidden_states_rc, residual_rc = self.norm1(
+            hidden_states[..., : hidden_states.shape[-1] // 2].flip(dims=[-2, -1]),
+            residual=residual[..., : hidden_states.shape[-1] // 2].flip(dims=[-2, -1])
+            if residual is not None
+            else None,
+            prenorm=True,
+            residual_in_fp32=self.residual_in_fp32,
+        )
+        hidden_states = cat(
+            [hidden_states_fwd, hidden_states_rc.flip(dims=[-2, -1])], dim=-1
+        )
+        residual = cat([residual_fwd, residual_rc.flip(dims=[-2, -1])], dim=-1)
+
+        ###################################################
+        # ------------ Run the Mixer ---------------------#
+        ###################################################
+
+        if mixer_kwargs is None:
+            mixer_kwargs = {}
+        hidden_states = self.mixer(
+            hidden_states,
+            inference_params=inference_params,
+            num_tokens=num_tokens,
+            **mixer_kwargs,
+        )
+
+        ##################################################
+        # ----------- Split Norm 2 into fwd and rc ------#
+        ##################################################
+        if self.mlp is not None:
+            hidden_states_fwd, residual_fwd = self.norm2(
+                hidden_states[..., hidden_states.shape[-1] // 2 :],
+                residual=residual[..., hidden_states.shape[-1] // 2 :]
+                if residual is not None
+                else None,
+                prenorm=True,
+                residual_in_fp32=self.residual_in_fp32,
+            )
+
+            hidden_states_rc, residual_rc = self.norm2(
+                hidden_states[..., : hidden_states.shape[-1] // 2].flip(dims=[-2, -1]),
+                residual=residual[..., : hidden_states.shape[-1] // 2].flip(
+                    dims=[-2, -1]
+                )
+                if residual is not None
+                else None,
+                prenorm=True,
+                residual_in_fp32=self.residual_in_fp32,
+            )
+            hidden_states = cat(
+                [hidden_states_fwd, hidden_states_rc.flip(dims=[-2, -1])], dim=-1
+            )
+            residual = cat([residual_fwd, residual_rc.flip(dims=[-2, -1])], dim=-1)
+
+        ###########################################
+        # ------------- Update FLOPs --------------#
+        ###########################################
+        if self.flops_counter is not None:
+            # Add FLOPs for mlps, defer mixer FLOPs to inner mixer layers
+            norm_1_flops = 0.0  # ignore
+            norm_2_flops = norm_1_flops  # ignore
+            # TODO: Account for different types of MLPs? (Always SwiGLU for now, requires larger changes)
+            if isinstance(self.mlp, SwiGLU):
+                mlp_flops = (
+                    2
+                    * int(num_tokens.sum().item())
+                    * (3 * self.mlp.d_model * self.mlp.d_intermediate)
+                )  # in_dim = d_model, out_dim = ffw_dim
+                gate_flops = 5 * int(num_tokens.sum().item()) * self.mlp.d_model
+
+                self.flops_counter.add_flops(
+                    mlp_flops + gate_flops + norm_1_flops + norm_2_flops
+                )
+            # self.flops_counter.add_flops(
+            #    2
+            #    * int(num_tokens.sum().item())
+            #    * sum([x.numel() for x in self.parameters()])
+            # )
+
+        return hidden_states, residual
+
+    def step(self, hidden_states, inference_params, residual=None):
+        raise NotImplementedError("RCPS version of step not implemented")
