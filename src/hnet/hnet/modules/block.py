@@ -291,8 +291,28 @@ class RCPSBlock(Block):
     RCPS version of a block (taken from Caducues)
     """
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(
+        self,
+        d_model,
+        mixer_cls=None,
+        mlp_cls=None,
+        norm_cls=None,
+        residual_in_fp32=True,
+        flops_counter=None,
+    ):
+        super().__init__(
+            d_model, mixer_cls, mlp_cls, norm_cls, residual_in_fp32, flops_counter
+        )
+        self.norm1 = norm_cls(d_model // 2)
+        self.mixer = mixer_cls(d_model)
+        if mlp_cls is not nn.Identity:
+            self.norm2 = norm_cls(d_model // 2)
+            self.mlp = mlp_cls(d_model)
+        else:
+            self.mlp = None
+
+        assert RMSNorm is not None, "Triton is not installed"
+        assert isinstance(self.norm1, RMSNorm), "Only RMSNorm is supported"
 
     def forward(
         self,
