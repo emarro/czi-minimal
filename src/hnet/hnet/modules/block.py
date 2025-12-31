@@ -108,7 +108,6 @@ def create_block(
     factory_kwargs = {"device": device, "dtype": dtype}
 
     # Mixer
-    print(f" Layer idx {layer_idx} arch: {arch}")
     if arch in ("t", "T"):
         mixer_cls = partial(
             CausalMHA,
