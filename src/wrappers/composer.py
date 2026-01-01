@@ -114,7 +114,7 @@ class ComposerWrapper(HuggingFaceModel):
                 preds = preds.view(-1)
                 labels = labels.view(-1)
                 if self.mlm:
-                    # if MLM only count
+                    # if MLM, only counts non padded labels
                     preds = preds[labels != -100]
                     labels = labels[labels != -100]
                     # preds[labels == -100] = 0
