@@ -58,11 +58,22 @@ class CaduceusWrapper(Caduceus):
     """
 
     def __init__(self, *args, flops_counter=None, **kwargs):
-        super().__init__(*args, **kwargs)
         cad_cfg = kwargs["config"]
-        self.d_model = cad_cfg.d_model
-        self.expand = cad_cfg.layer_cfg.mamba_cfg.ssm_cfg["expand"]
-        self.d_state = cad_cfg.layer_cfg.mamba_cfg.ssm_cfg["d_state"]
+        if True:
+            super().__init__(*args, **kwargs)
+            self.d_model = cad_cfg.d_model
+            self.expand = cad_cfg.layer_cfg.mamba_cfg.ssm_cfg["expand"]
+            self.d_state = cad_cfg.layer_cfg.mamba_cfg.ssm_cfg["d_state"]
+        else:  # Not used, kept for reference, TODO: merge
+            # alternate processing depending on caducues version, TODO: standardize
+            self.expand = cad_cfg.layer_cfg["mamba_cfg"]["ssm_cfg"]["expand"]
+            self.d_state = cad_cfg.layer_cfg["mamba_cfg"]["ssm_cfg"]["d_state"]
+            super().__init__(
+                d_model=self.d_model,
+                bidirectional=cad_cfg.bidirectional,
+                bidirectional_strategy=cad_cfg.bidirectional_strategy,
+                **cad_cfg.layer_cfg["mamba_cfg"]["ssm_cfg"],
+            )
         self.flops_counter = flops_counter
 
     def forward(self, *args, num_tokens, **kwargs):
