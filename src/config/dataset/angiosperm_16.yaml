@@ -1,6 +1,6 @@
 data_local: null
 data_remote: "kuleshov-group/Angiosperm_16_genomes"
-mlm: False #Whether we're training an MLM model or AR
+#mlm: False #Whether we're training an MLM model or AR
 mlm_probability: 0.15 # prob of masking a given token in an input sequence
 mask_replace_prob: 0.80 # prob of replacing a masked token with [MASK]
 random_replace_prob: 0.10 #prob of replacing a masked token with another token in the vocab
