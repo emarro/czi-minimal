@@ -287,7 +287,7 @@ class Block(nn.Module):
 
 class RCPSBlock(Block):
     """
-    RCPS version of a block (taken from Caducues)
+    RCPS version of a block (taken from Caduceus)
     """
 
     def __init__(
