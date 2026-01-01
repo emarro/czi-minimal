@@ -5,7 +5,8 @@ defaults:
   - override /trainer: fixed_batch
   #- override /loggers: wandb
 
-
+model:
+  mlm: True
 
 task_name: "debug_cnet"
 
