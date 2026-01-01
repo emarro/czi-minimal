@@ -62,6 +62,9 @@ def weighted_cross_entropy(
         logits, y, ignore_index=pad_token_id, reduction="none"
     )  # [batch * seq_len]
     loss_weights = loss_weights.view(-1)  # [batch*seq_len]
+    assert y.shape[0] == logits.shape[0], (
+        f"Shape mismatch, got {logits.shape[0]} logits and {y.shape[0]} labels with {loss_weights.shape[0]} weights"
+    )
     loss_weights[y == pad_token_id] = 0.0
     # TODO: Follows GPN implementation, but should we remove weight normalization?
     return ce * (loss_weights / loss_weights.sum())  # .sum()  # [1]
