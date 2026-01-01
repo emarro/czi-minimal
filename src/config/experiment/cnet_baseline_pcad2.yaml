@@ -1,0 +1,20 @@
+# @package _global_
+# let the experiment node modify configs globally
+defaults:
+  - override /model: pcad2_small
+  - override /loggers: wandb
+  - override /dataset: pcad2
+
+
+tags: ["cnet", "baseline"]
+
+
+
+task_name: "cad2_baseline"
+
+optimizer:
+  lr: 5e-4
+
+loggers:
+  wandb:
+    tags: ${tags}
