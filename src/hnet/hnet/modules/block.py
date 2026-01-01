@@ -59,13 +59,14 @@ class CaduceusWrapper(Caduceus):
 
     def __init__(self, *args, flops_counter=None, **kwargs):
         cad_cfg = kwargs["config"]
-        if True:
+        try:
             super().__init__(*args, **kwargs)
             self.d_model = cad_cfg.d_model
             self.expand = cad_cfg.layer_cfg.mamba_cfg.ssm_cfg["expand"]
             self.d_state = cad_cfg.layer_cfg.mamba_cfg.ssm_cfg["d_state"]
-        else:  # Not used, kept for reference, TODO: merge
+        except TypeError as e:
             # alternate processing depending on caducues version, TODO: standardize
+            self.d_model = cad_cfg.d_model
             self.expand = cad_cfg.layer_cfg["mamba_cfg"]["ssm_cfg"]["expand"]
             self.d_state = cad_cfg.layer_cfg["mamba_cfg"]["ssm_cfg"]["d_state"]
             super().__init__(
