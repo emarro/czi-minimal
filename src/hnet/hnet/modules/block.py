@@ -398,6 +398,7 @@ class RCPSBlock(Block):
                 [hidden_states_fwd, hidden_states_rc.flip(dims=[-2, -1])], dim=-1
             )
             residual = cat([residual_fwd, residual_rc.flip(dims=[-2, -1])], dim=-1)
+            hidden_states = self.mlp(hidden_states)
 
         ###########################################
         # ------------- Update FLOPs --------------#
