@@ -8,8 +8,6 @@ import hydra_setup  # register resolvers for hydra
 
 import hydra
 import torch
-from caduceus import CaduceusConfig, CaduceusForMaskedLM, CaduceusTokenizer
-from collections import namedtuple
 from composer import Trainer
 from composer.callbacks import (
     LRMonitor,
@@ -20,30 +18,13 @@ from composer.callbacks import (
 )
 from composer.core import Evaluator
 from composer.loggers import WandBLogger
-from composer.models import HuggingFaceModel
-from composer.optim import DecoupledAdamW
-from composer.optim.scheduler import CosineAnnealingWithWarmupScheduler
 from composer.utils import dist, reproducibility
 from datasets import load_dataset
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
-from torchmetrics import PearsonCorrCoef
-from torchmetrics.aggregation import MeanMetric, RunningMean
-from torchmetrics.classification import MulticlassAccuracy
 from transformers import (
     DataCollatorForLanguageModeling,
-    AutoConfig,
-    AutoModelForMaskedLM,
-    AutoTokenizer,
 )
-
-from hnet.models.mixer_seq import HNetForCausalLM
-from hnet.models.config_hnet import (
-    AttnConfig,
-    SSMConfig,
-    HNetConfig,
-)
-from hnet.utils.tokenizers import ByteTokenizer
 
 
 from composer.models.tasks import ComposerClassifier
@@ -53,291 +34,10 @@ from composer.profiler.profiler import Profiler
 from callbacks.flop_counter import FlopMonitor, BPredMonitor
 from callbacks.visualizer import IGVCallBack
 from callbacks.logger import ChrChunker
+# from callbacks.hf_saver import HuggingFaceCompatibleCheckpointing
 
 
 logger = logging.getLogger(__name__)
-
-
-class Vocab(dict):
-    def __init__(self):
-        self.cur_idx = 0
-        self.idx_to_key = {}
-
-    def __getitem__(self, key):
-        if key not in self:
-            self[key] = self.cur_idx
-            self.idx_to_key[str(self.cur_idx)] = key
-            self.cur_idx += 1
-        return super().__getitem__(key)
-
-    def decode(self, key):
-        if type(key) is not str:
-            key = str(key)
-        return self.idx_to_key[key]
-
-    def decode_seq(self, seq):
-        return [self.decode(x) for x in seq]
-
-
-class ComposerWrapper(HuggingFaceModel):
-    def __init__(self, *args, mlm=True, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.val_pcc = PearsonCorrCoef()
-        self.val_pcc.tag = ""
-        self.val_loss = MeanMetric()
-        self.val_loss.tag = ""
-        self.train_ar_loss = RunningMean()
-        self.train_ar_loss.tag = "ar"
-        self.val_ar_loss = MeanMetric()
-        self.val_ar_loss.tag = "ar"
-        self.train_ratio_loss = RunningMean()
-        self.train_ratio_loss.tag = "ratio"
-        self.val_ratio_loss = MeanMetric()
-        self.val_ratio_loss.tag = "ratio"
-
-        self.train_acc = MulticlassAccuracy(average="micro", ignore_index=-100)
-        self.train_acc.tag = "acc"
-
-        self.val_acc = MulticlassAccuracy(average="micro", ignore_index=-100)
-        self.val_acc.tag = "acc"
-
-        self.mlm = mlm
-
-    def eval_forward(self, batch, outputs=None):
-        alt_outputs = None  # hacky placeholder for second fwd pass for ALT seqs in VEP
-        if outputs:
-            return outputs
-        if "ref_id" in batch and not self.mlm:
-            # if we're doning a VEP task, it makes life much easier to do the ALT fwd pass here and shove it into the output tuple
-            ref_bp_id = batch["ref_id"]  # [B]
-            ref_ids = batch["input_ids"].detach().clone()
-            B, seq_len = ref_ids.shape
-            var_idx = seq_len // 2
-            # update (possibly masked) token with ref
-            ref_ids[:, var_idx] = ref_bp_id
-
-            assert torch.all(ref_ids[:, var_idx] == ref_bp_id), (
-                f"REF bps from batch do not match the input ids, IDS: {ref_ids[:, var_idx - 1 : var_idx + 2]}, ref_bps: {ref_bp_id}"
-            )
-            alt_bp_id = batch["alt_id"]  # [B]
-            alt_ids = batch["input_ids"].detach().clone()
-            B, seq_len = alt_ids.shape
-            # update (possibly masked) token with alt
-            alt_ids[:, var_idx] = alt_bp_id
-            assert torch.all(ref_bp_id != alt_bp_id), (
-                f"REF and ALT bps are the same bp for some batches. REF: {ref_bp_id[ref_bp_id == alt_bp_id]} ALT: {alt_bp_id[ref_bp_id == alt_bp_id]}"
-            )
-            assert torch.all(ref_ids[:, :var_idx] == alt_ids[:, :var_idx]), (
-                "Not all ids before the variant site match"
-            )
-            assert torch.all(ref_ids[:, var_idx + 1 :] == alt_ids[:, var_idx + 1 :]), (
-                "Not all ids after the variant site match"
-            )
-            assert torch.all(ref_ids[:, var_idx] != alt_ids[:, var_idx]), (
-                f"Some variants have the same ALT and REF bp, REF: {ref_ids[:, var_idx][ref_ids[:, var_idx] == alt_ids[:, var_idx]]} ALT: {alt_ids[:, var_idx][ref_ids[:, var_idx] == alt_ids[:, var_idx]]}"
-            )
-
-            alt_outputs = self.model(input_ids=alt_ids)
-
-            new_batch = {
-                "input_ids": ref_ids,
-                "labels": batch["labels"],
-                "loss_weights": batch["loss_weights"],
-            }
-
-            if "target_ratio" in batch:
-                new_batch["target_ratio"] = batch["target_ratio"]
-
-            batch = new_batch
-
-        outputs = self.model(**batch)
-
-        if alt_outputs is not None:
-            # hacky way to add the alternate input to the output tuple posthoc
-            outputs = outputs._asdict()
-            outputs["alt_outputs"] = alt_outputs
-            new_namedtuple = namedtuple("CausalLMOutputsforZS", outputs.keys())
-            outputs = new_namedtuple(**outputs)
-        return outputs
-
-    def update_metric(self, batch, outputs, metric) -> None:
-        """
-        Update metric by returning as a socre the (log) ref/alt probabilities
-        Args:
-            batch: dict[str, Tensor] the input batch.
-            outputs: MaskedLMOutput['logits': Tensor(batch, seq_len, vocab_len), 'loss': float]
-            metric: torchmetrics.Metric the metric we're updating
-        """
-        # TODO: Redo by shoving all the evals for each split into a collection class?
-        if metric.tag is not None and (
-            len(batch.keys()) == 5 or "ref_id" not in batch
-        ):  # not in the zero-shot eval task
-            val = None
-            if metric.tag == "ar":
-                val = outputs.ar_loss if not self.mlm else None
-            elif metric.tag == "ratio":
-                val = outputs.ratio_loss if not self.mlm else None
-            elif metric.tag == "acc":
-                B, L, V = outputs.logits.shape
-                preds = outputs.logits.softmax(dim=-1).argmax(dim=-1)
-                labels = batch["labels"]
-                if self.mlm:
-                    # if MLM only count
-                    preds[labels == -100] = 0
-                    labels[labels == -100] = 0
-                metric.update(preds.view(-1), labels.view(-1))
-                return
-            else:
-                val = outputs.loss
-            if val is not None:
-                metric.update(value=val)
-            return
-        probs = outputs.logits.softmax(dim=-1)
-        batch_size, seq_len, vocab_len = outputs.logits.shape
-
-        if self.mlm:
-            ref_bp = batch["ref_id"]  # [batch_size]
-            ref_prob = torch.gather(
-                probs[:, (seq_len // 2) - 1, :], dim=1, index=ref_bp.unsqueeze(1)
-            ).squeeze(1)
-
-            alt_bp = batch["alt_id"]  # [batch_size]
-            alt_prob = torch.gather(
-                probs[:, (seq_len // 2) - 1, :], dim=1, index=alt_bp.unsqueeze(1)
-            ).squeeze(1)
-
-            assert len(probs.shape) == 3, (
-                f"Expected probs of shape [batch, seq_len, vocba_len], found {probs.shape}"
-            )
-            assert (probs < 0).sum() == 0, (
-                f"Found probabilities less than 0 in probs: {probs[probs < 0]}"
-            )
-            assert (probs > 1).sum() == 0, (
-                f"Found probabilities greater than 1 in probs: {probs[probs > 1]}"
-            )
-            assert ((torch.abs(probs.sum(dim=-1)) - 1) > 1e-5).sum() == 0, (
-                f"Probabilities in probs do not normalize to 1: {probs[(torch.abs(probs.sum(dim=-1)) - 1) > 1e-5]}"
-            )
-            score = torch.log(alt_prob / ref_prob)
-        else:
-            alt_probs = outputs.alt_outputs.logits.softmax(dim=-1)
-            ref_bp = batch["ref_id"]  # [B]
-            alt_bp = batch["alt_id"]  # [B]
-            input_ids = batch["input_ids"]  # [B, L]
-            var_idx = seq_len // 2
-
-            assert torch.all(input_ids[:, var_idx] == ref_bp), (
-                f"REF bps from batch do not match the input ids, IDS: {input_ids[:, var_idx - 1 : var_idx + 2]}, ref_bps: {ref_bp}"
-            )
-            assert torch.all(ref_bp != alt_bp), (
-                "Not all REF and  ALT bps are different, error in pre-processing"
-            )
-
-            ref_log_probs = torch.log(
-                torch.gather(probs, dim=-1, index=input_ids.unsqueeze(-1)).squeeze(2)
-            )
-            alt_ids = input_ids.detach().clone()  # [B, L]
-            alt_ids[:, var_idx] = alt_bp
-            assert torch.all(input_ids[:, :var_idx] == alt_ids[:, :var_idx]), (
-                "Not all ids before the variant site match"
-            )
-            assert torch.all(
-                input_ids[:, var_idx + 1 :] == alt_ids[:, var_idx + 1 :]
-            ), "Not all ids after the variant site match"
-            ref_check = input_ids[:, var_idx]
-            alt_check = alt_ids[:, var_idx]
-            not_match = ref_check != alt_check
-
-            assert torch.all(not_match), (
-                f"Some REF and ALT sequences have the same BP at the variant site, REFs: {ref_check[~not_match]} ({ref_check[~not_match].shape}), ALTs: {alt_check[~not_match]} ({alt_check[~not_match].shape})"
-            )
-
-            alt_log_probs = torch.log(
-                torch.gather(alt_probs, dim=-1, index=alt_ids.unsqueeze(-1)).squeeze(2)
-            )
-            ref_pll = ref_log_probs.mean(dim=-1)
-            alt_pll = alt_log_probs.mean(dim=-1)
-            score = alt_pll - ref_pll
-
-        maf = batch["MAF"]  # the 'label' [batch_size]
-
-        metric.update(preds=score, target=maf)
-
-    def get_metrics(self, is_train=False):
-        if is_train:
-            return {
-                "ARLoss": self.train_ar_loss,
-                "RatioLoss": self.train_ratio_loss,
-                "Accuracy": self.train_acc,
-            }
-        return {
-            "PearsonCorrCoef": self.val_pcc,
-            "EvalLoss": self.val_loss,
-            "ARLoss": self.val_ar_loss,
-            "RatioLoss": self.val_ratio_loss,
-            "Accuracy": self.val_acc,
-        }
-
-
-def build_model(cfg: DictConfig):
-    """Build Caduceus model from config."""
-    # TODO: Redo this whole thing, switch to hydra for cfg mngmnt and create unified instiation
-    if cfg.from_pretrained:
-        model_config = AutoConfig.from_pretrained(
-            cfg.pretrained_name_or_path, trust_remote_code=True
-        )
-        tokenizer = AutoTokenizer.from_pretrained(
-            cfg.pretrained_name_or_path, trust_remote_code=True
-        )
-        tokenizer.characters = "atcg"
-        if cfg.from_scratch:
-            model = AutoModelForMaskedLM.from_config(
-                model_config, trust_remote_code=True
-            )
-        else:
-            model = AutoModelForMaskedLM.from_pretrained(
-                cfg.pretrained_name_or_path, trust_remote_code=True
-            )
-    else:
-        if cfg.hnet_model:
-            model_config = cfg.get("model")
-            model_config = OmegaConf.to_container(model_config, resolve=True)
-            # attn_cfg = AttnConfig(**model_config.get("attn_cfg"))
-            # ssm_cfg = SSMConfig(**model_config.get("ssm_cfg"))
-            hnet_cfg = HNetConfig(**model_config)
-            # Create model
-            model = HNetForCausalLM(hnet_cfg, dtype=torch.bfloat16)
-            # Use existing tokenizer instead of byte tokenizer (dna is already in bytes)
-            # tokenizer = ByteTokenizer()
-            tokenizer = CaduceusTokenizer(model_max_length=cfg.max_seq_len)
-
-        else:
-            model_config = cfg.model.get("model_config", {})
-            model_config = CaduceusConfig(**model_config)
-            model = CaduceusForMaskedLM(model_config)
-            tokenizer = CaduceusTokenizer(model_max_length=cfg.max_seq_len)
-
-    # Debug info
-    logger.info("\n=== Model Configuration ===")
-    logger.info(
-        f"Total number of parameters: {sum([x.numel() for x in model.parameters()])}"
-    )
-    logger.info(
-        f"Total number of trainable parameters: {sum([x.numel() for x in model.parameters() if x.requires_grad])}"
-    )
-    print(f"Total number of parameters: {sum([x.numel() for x in model.parameters()])}")
-    print(
-        f"Total number of trainable parameters: {sum([x.numel() for x in model.parameters() if x.requires_grad])}"
-    )
-
-    logger.info(f"Model config: {model_config}")
-    logger.info(f"Tokenizer vocab size: {len(tokenizer.get_vocab())}")
-    logger.info(f"Model vocab size: {model.config.vocab_size}")
-    logger.info(f"Tokenizer vocab: {tokenizer.get_vocab()}")
-    logger.info("=========================\n")
-
-    # return HuggingFaceModel(model, tokenizer, eval_metrics=None)
-    return ComposerWrapper(model, tokenizer, mlm=cfg.mlm)
 
 
 def build_dataloader(
@@ -590,7 +290,6 @@ def run_training(cfg: DictConfig) -> None:
     # Build model
     logger.info("Building model...")
     model = hydra.utils.instantiate(cfg.model)
-    # model = build_model(cfg)
     num_params = sum([x.numel() for x in model.parameters()])
     num_trainable_params = sum(
         [x.numel() for x in model.parameters() if x.requires_grad]
@@ -622,6 +321,18 @@ def run_training(cfg: DictConfig) -> None:
             num_checkpoints_to_keep=cfg.trainer.get("save_num_checkpoints_to_keep", -1),
             overwrite=cfg.trainer.get("save_overwrite", False),
         ),
+        # WIP
+        # HuggingFaceCompatibleCheckpointing(
+        #    disable_hf=cfg.callbacks.get("disable_hf"),
+        #    save_local=cfg.callbacks.get("save_local"),
+        #    save_to_hub=cfg.callbacks.get("save_to_hub"),
+        #    hub_repo_id=cfg.callbacks.get("hub_repo_id"),
+        #    weights_only=True,
+        #    folder=cfg.callbacks.get("save_folder"),
+        #    save_interval=cfg.callbacks.get("save_interval", "1000ba"),
+        #    num_checkpoints_to_keep=cfg.trainer.get("save_num_checkpoints_to_keep", -1),
+        #    overwrite=cfg.trainer.get("save_overwrite", False),
+        # ),
         RuntimeEstimator(),
         MemoryMonitor(),
         FlopMonitor(),
