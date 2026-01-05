@@ -5,7 +5,7 @@ defaults:
   - override /trainer: fixed_batch
   - override /dataset: hg38_512
   - override /eval_dataset: clinvar
-  #- override /loggers: wandb
+  - override /loggers: wandb
 
 
 tags: ["mlm", "baseline"]
