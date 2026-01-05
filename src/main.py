@@ -429,8 +429,12 @@ def build_dataloader(
             ref_id, alt_id = None, None
             var_idx = None
             if self.mask_seq:
-                var_idx = (len(sequence) // 2) - 1
+                var_idx = len(sequence) // 2
                 seq_bp = sequence[var_idx]
+                if item["ref"] != seq_bp:
+                    # var_idx -= 1
+                    sequence = sequence[::-1]
+                    seq_bp = sequence[var_idx]
                 assert item["ref"] == seq_bp, (
                     f"Masking in eval dataloader failed, found {seq_bp} when we expected {item['ref']} around {sequence[var_idx - 5 : var_idx + 5]}"
                 )
@@ -708,9 +712,9 @@ def run_training(cfg: DictConfig) -> None:
         )
 
         zeroshot_val_loader = Evaluator(
-            label="maize_allele_freq",
+            label=cfg.eval_dataset.label,
             dataloader=zeroshot_val_loader,
-            metric_names=["PearsonCorrCoef"],
+            metric_names=[cfg.eval_dataset.target],
             eval_interval=cfg.eval_dataset.eval_interval,
             device_eval_microbatch_size=cfg.trainer.device_train_microbatch_size,
         )
@@ -720,7 +724,11 @@ def run_training(cfg: DictConfig) -> None:
             )
         eval_dataloaders = [val_loader, zeroshot_val_loader]
 
-    if cfg.maize_dataset is not None and cfg.model.get("log_bpreds", False):
+    if (
+        "maize_dataset" in cfg
+        and cfg.maize_dataset is not None
+        and cfg.model.get("log_bpreds", False)
+    ):
         maize_val_loader = build_dataloader(
             cfg.maize_dataset,
             model.tokenizer,
