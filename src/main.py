@@ -169,8 +169,8 @@ class ComposerWrapper(HuggingFaceModel):
             metric: torchmetrics.Metric the metric we're updating
         """
         # TODO: Redo by shoving all the evals for each split into a collection class?
-        if (
-            metric.tag is not None and (len(batch.keys()) == 5 or "ref_id" not in batch)
+        if metric.tag is not None and (
+            len(batch.keys()) == 5 or "ref_id" not in batch
         ):  # not in the zero-shot eval task
             val = None
             if metric.tag == "ar":
@@ -636,10 +636,13 @@ def run_training(cfg: DictConfig) -> None:
         if "WANDB_API_KEY" not in os.environ:
             os.environ["WANDB_API_KEY"] = api_key
         import wandb
+
         try:
             wandb.login()
         except Exception as e:
-            print(f"Logging in with key {os.environ["WANDB_API_KEY"]} failed, error {e}")
+            print(
+                f"Logging in with key {os.environ['WANDB_API_KEY']} failed, error {e}"
+            )
             raise Exception(e)
         dict_cfg: dict[str, Any] = OmegaConf.to_container(cfg, resolve=True)
         dict_cfg["num_params"] = num_params
@@ -687,7 +690,8 @@ def run_training(cfg: DictConfig) -> None:
         label="eval_split",
         dataloader=val_loader,
         metric_names=["EvalLoss", "ARLoss", "RatioLoss", "Accuracy"],
-        eval_interval = cfg.dataset.eval_interval,
+        eval_interval=cfg.dataset.eval_interval,
+        device_eval_microbatch_size=cfg.trainer.device_train_microbatch_size,
     )
     eval_dataloaders = [val_loader]
     if cfg.eval_dataset is not None:
@@ -707,7 +711,8 @@ def run_training(cfg: DictConfig) -> None:
             label="maize_allele_freq",
             dataloader=zeroshot_val_loader,
             metric_names=["PearsonCorrCoef"],
-            eval_interval = cfg.eval_dataset.eval_interval,
+            eval_interval=cfg.eval_dataset.eval_interval,
+            device_eval_microbatch_size=cfg.trainer.device_train_microbatch_size,
         )
         if cfg.model.get("log_bpreds", False):
             callbacks.append(
@@ -733,6 +738,7 @@ def run_training(cfg: DictConfig) -> None:
             dataloader=maize_val_loader,
             eval_interval=cfg.maize_dataset.eval_interval,
             metric_names=[],
+            device_eval_microbatch_size=cfg.trainer.device_train_microbatch_size,
         )
         eval_dataloaders.append(maize_val_loader)
         if not os.path.exists(cfg.maize_dataset.save_dir):
