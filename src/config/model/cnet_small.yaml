@@ -24,5 +24,5 @@ use_return_dict: False
 # Meta variables, not used in HNetConfig directly
 default_target_ratio: 3
 max_seq_len: 512
-mlm: False
+mlm: True
 log_bpreds: True
