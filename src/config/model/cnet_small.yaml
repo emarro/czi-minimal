@@ -2,7 +2,7 @@ _target_: wrappers.hnet.build_model
 _convert_: "all"
 _modelstr_: "cnet_${model.arch_layout}_N=${model.default_target_ratio}_D=${model.d_model}"
 
-arch_layout: ["c3t1",["M15"],"c4"] #architecture for DNA from Table 7 with best PPL in HNet paper
+arch_layout: ["c3t1",["C15"],"c4"] #architecture for DNA from Table 7 with best PPL in HNet paper
 d_model: [512, 512] #d_model of each stage (matches stages from arch_layout)
 d_intermediate: [512, 768] # size of FFN sizes corresponding to above
 vocab_size: 16
