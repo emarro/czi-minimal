@@ -537,7 +537,7 @@ def build_dataloader(
     tokenized_dataset = TokenizedDataset(
         dataset,
         tokenizer,
-        max_seq_len,
+        max_seq_len if cfg.seq_len is None else cfg.seq_len,
         cfg.repeat_weight,
         mask_seq=mask_seq,
         default_target_ratio=default_target_ratio,

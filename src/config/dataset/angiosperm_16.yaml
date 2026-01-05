@@ -8,4 +8,4 @@ cutoff: 0.6 # percentage of 'N's not allowed in dataset
 repeat_weight: 0.10 #downweight losses for soft-masked DNA regions
 num_workers: 2 #num workers to load dataset
 eval_interval: "250ba"
-
+seq_len: 512
