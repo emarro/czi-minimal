@@ -1,7 +1,7 @@
 # @package _global_
 # let the experiment node modify configs globally
 defaults:
-  - override /model: cnet_tiny
+  - override /model: cnet_small
   - override /trainer: fixed_batch
   - override /dataset: hg38_512
   - override /eval_dataset: clinvar
@@ -11,22 +11,16 @@ defaults:
 model:
   mlm: True
 
-task_name: "debug_hg38"
+task_name: "baseline_hg38"
 
 optimizer:
   lr: 5e-4
 
-callbacks:
-  save_interval: "1ba"
-
 trainer:
-  device_train_microbatch_size: 32  #depends on the amount of GPU mem available
-  max_duration: "15ba"
-  eval_interval: "20ba"  # Evaluate every 5k batches
-  global_train_batch_size: 32
-  save_overwrite: True
-  autoresume: False
-  reset_time: True
+  device_train_microbatch_size: "auto"  #depends on the amount of GPU mem available
+  max_duration: "25ep"
+  eval_interval: "250ba"  # Evaluate every 5k batches
+  global_train_batch_size: 2048
 
 #loggers:
 #  wandb:
