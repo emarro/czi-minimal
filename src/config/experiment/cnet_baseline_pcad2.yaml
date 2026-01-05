@@ -2,7 +2,7 @@
 # let the experiment node modify configs globally
 defaults:
   - override /model: pcad2_small
-  #- override /loggers: wandb
+  - override /loggers: wandb
   - override /dataset: pcad2
   - override /trainer: fixed_batch
 
@@ -18,10 +18,10 @@ optimizer:
 
 trainer:
   global_train_batch_size: 2048 # set small for debugging
-  device_train_microbatch_size: 16 # max size for the small model on 48Gb card (6000ada), 16 for h100 
+  device_train_microbatch_size: 8 # max size for the small model on 48Gb card (6000ada), 16 for h100 
   save_interval: "25ba" # with above settings, ckpts every ~500M tokens
   max_duration: "5ep" #"500ba"  # Train for 50 epochs
 
-#loggers:
-#  wandb:
-#    tags: ${tags}
+loggers:
+  wandb:
+    tags: ${tags}
