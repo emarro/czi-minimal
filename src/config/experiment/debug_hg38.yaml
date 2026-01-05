@@ -1,10 +1,11 @@
 # @package _global_
 # let the experiment node modify configs globally
 defaults:
-  - override /model: cnet_small
+  - override /model: cnet_tiny
   - override /trainer: fixed_batch
   - override /dataset: hg38_512
   - override /eval_dataset: clinvar
+  - override /maize_dataset: null
   #- override /loggers: wandb
 
 model:

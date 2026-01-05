@@ -1,6 +1,8 @@
 data_local: null
-data_remote: "emarro/demo_variant_effect_pathogenic_clinvar_256" #"emarro/maize-allele-frequency-20k-val"
+data_remote: "emarro/clinvar_vep_512" #"emarro/maize-allele-frequency-20k-val"
 repeat_weight: 0.1
 num_workers: 1
 eval_interval: "1ep"
-seq_len: 256
+seq_len: 512
+target: "AUROC"
+label: "clinvar"

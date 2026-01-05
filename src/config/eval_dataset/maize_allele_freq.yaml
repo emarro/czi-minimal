@@ -4,3 +4,5 @@ repeat_weight: 0.1
 num_workers: 1
 eval_interval: "1ep"
 seq_len: 512
+target: "PearsonCorrCoef"
+label: "maize_allele_freq"
