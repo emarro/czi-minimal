@@ -20,7 +20,14 @@ def process_example(item):
     assert ref_bp != alt_bp, (
         f"Got the same bp {ref_bp} for both ref and alt at position {mid_point}"
     )
-    return {"seq": item["ref_forward_sequence"], "ref": ref_bp, "alt": alt_bp, "MAF": 0}
+    return {
+        "seq": item["ref_forward_sequence"],
+        "ref": ref_bp,
+        "alt": alt_bp,
+        "start": item["position"],
+        "stop": item["position"] + len(ref_seq),
+        "chrom": item["chromosome"],
+    }
 
 
 def main(args):

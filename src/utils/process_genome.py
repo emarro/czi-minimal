@@ -49,8 +49,9 @@ def main(args):
                 continue
             target.append(
                 {
-                    "chr": contig,
-                    "pos": start,  # 0-based start position
+                    "chrom": contig,
+                    "start": start,  # 0-based start position
+                    "stop": start + len(chunk),
                     "seq": chunk,
                 }
             )
