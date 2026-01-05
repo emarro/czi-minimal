@@ -1,6 +1,5 @@
 import torch
-
-from caduceus import CaduceusTokenizer
+from caduceus.caduceus import CaduceusTokenizer
 from hnet.models.mixer_seq import HNetForCausalLM
 from hnet.models.config_hnet import (
     AttnConfig,
