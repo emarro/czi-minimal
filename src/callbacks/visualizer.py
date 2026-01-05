@@ -147,7 +147,12 @@ class IGVCallBack(Callback):
             end = state.batch_get_item("end")
         except KeyError as _:
             end = state.batch_get_item("stop")
-        annot_mask = state.batch_get_item("annotation_mask")
+        try:
+            annot_mask = state.batch_get_item("annotation_mask")
+        except KeyError as _:
+            annot_mask = state.batch_get_item(
+                "loss_weights"
+            )  # quick workaround when we don't have annotations present
         loss_weights = state.batch_get_item("loss_weights")  # [B, L]
         min_weight = loss_weights.min()
         max_weight = loss_weights.max()
