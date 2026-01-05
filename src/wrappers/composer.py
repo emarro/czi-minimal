@@ -4,7 +4,7 @@ from collections import namedtuple
 from composer.models import HuggingFaceModel
 from torchmetrics import PearsonCorrCoef
 from torchmetrics.aggregation import MeanMetric, RunningMean
-from torchmetrics.classification import MulticlassAccuracy
+from torchmetrics.classification import MulticlassAccuracy, BinaryAUROC
 
 
 class ComposerWrapper(HuggingFaceModel):
@@ -12,6 +12,8 @@ class ComposerWrapper(HuggingFaceModel):
         super().__init__(*args, **kwargs)
         self.val_pcc = PearsonCorrCoef()
         self.val_pcc.tag = None
+        self.val_auroc = BinaryAUROC()
+        self.val_auroc.tag = None
         self.val_loss = MeanMetric()
         self.val_loss.tag = ""
         self.train_ar_loss = RunningMean()
@@ -131,13 +133,22 @@ class ComposerWrapper(HuggingFaceModel):
 
         if self.mlm:
             ref_bp = batch["ref_id"]  # [batch_size]
+            alt_bp = batch["alt_id"]  # [batch_size]
+            input_ids = batch["input_ids"]
+            var_idx = seq_len // 2
+            mask_id = 3  # TODO: lookup in tokenizer
+            if not torch.all(input_ids[:, var_idx] == mask_id):
+                var_idx -= 1
+            assert torch.all(input_ids[:, var_idx] == mask_id), (
+                f"Not all input ids match up with the reference bp at position {var_idx}, ref: {input_ids[:, var_idx - 4 : var_idx + 4], ref_bp}"
+            )
+
             ref_prob = torch.gather(
-                probs[:, (seq_len // 2) - 1, :], dim=1, index=ref_bp.unsqueeze(1)
+                probs[:, var_idx, :], dim=1, index=ref_bp.unsqueeze(1)
             ).squeeze(1)
 
-            alt_bp = batch["alt_id"]  # [batch_size]
             alt_prob = torch.gather(
-                probs[:, (seq_len // 2) - 1, :], dim=1, index=alt_bp.unsqueeze(1)
+                probs[:, var_idx, :], dim=1, index=alt_bp.unsqueeze(1)
             ).squeeze(1)
 
             assert len(probs.shape) == 3, (
@@ -193,9 +204,11 @@ class ComposerWrapper(HuggingFaceModel):
             alt_pll = alt_log_probs.mean(dim=-1)
             score = alt_pll - ref_pll
 
-        maf = batch["MAF"]  # the 'label' [batch_size]
+        target = (
+            batch["label"] if "label" in batch else batch["MAF"]
+        )  # the 'label' [batch_size]
 
-        metric.update(preds=score, target=maf)
+        metric.update(preds=score, target=target)
 
     def get_metrics(self, is_train=False):
         if is_train:
@@ -206,6 +219,7 @@ class ComposerWrapper(HuggingFaceModel):
             }
         return {
             "PearsonCorrCoef": self.val_pcc,
+            "AUROC": self.val_auroc,
             "EvalLoss": self.val_loss,
             "ARLoss": self.val_ar_loss,
             "RatioLoss": self.val_ratio_loss,
