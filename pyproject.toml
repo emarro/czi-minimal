@@ -14,11 +14,19 @@ dependencies = [
     "torch==2.7.0",
     "flash-attn>=2.8.0.post2",
     "wandb>=0.23.0",
-    "hnet @ ${PROJECT_ROOT}/src/hnet",
-    "caduceus @ ${PROJECT_ROOT}/src/caduceus",
     "zstandard>=0.25.0",
-    "causal-conv1d>=1.5.3.post1",
+    "mamba-ssm[causal-conv1d]>=2.2.6.post3",
+    "optree>=0.18.0",
 ]
 
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true }]
+mamba-ssm = [{ requirement = "torch", match-runtime = true }]
+causal-conv1d = [{ requirement = "torch", match-runtime = true }]
+
+
+[tool.uv.workspace]
+members = [
+    "src/caduceus",
+    "src/hnet",
+]
