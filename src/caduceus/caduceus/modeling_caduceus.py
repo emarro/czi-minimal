@@ -135,7 +135,7 @@ class BiMambaWrapper(nn.Module):
         else:
             self.mamba_rev = None
 
-    def forward(self, hidden_states, inference_params=None):
+    def forward(self, hidden_states, inference_params=None, **kwargs):
         """Bidirectional-enabled forward pass
 
         hidden_states: (B, L, D)
