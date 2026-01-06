@@ -11,9 +11,9 @@ from flash_attn.utils.generation import GenerationMixin
 from .hnet import HNet, HNetState
 from .config_hnet import HNetConfig
 
-from hnet.modules.dc import RoutingModuleOutput
-from hnet.modules.utils import apply_optimization_params
-from hnet.modules.utils import FlopsCounter
+from ..modules.dc import RoutingModuleOutput
+from ..modules.utils import apply_optimization_params
+from ..modules.utils import FlopsCounter
 
 
 @dataclass

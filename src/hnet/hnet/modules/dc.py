@@ -8,7 +8,7 @@ from einops import repeat, rearrange
 
 from mamba_ssm.ops.triton.ssd_combined import mamba_chunk_scan_combined
 
-from hnet.modules.utils import get_seq_idx
+from .utils import get_seq_idx
 
 
 @dataclass
@@ -45,7 +45,6 @@ class DeChunkState:
 
 
 class RoutingModule(nn.Module):
-
     def __init__(self, d_model, device=None, dtype=None):
         self.d_model = d_model
         factory_kwargs = {"device": device, "dtype": dtype}
@@ -67,17 +66,17 @@ class RoutingModule(nn.Module):
         )
 
     def forward(self, hidden_states, cu_seqlens=None, mask=None, inference_params=None):
-        assert (mask is not None) or (
-            cu_seqlens is not None
-        ), "Either mask or cu_seqlens must be provided"
+        assert (mask is not None) or (cu_seqlens is not None), (
+            "Either mask or cu_seqlens must be provided"
+        )
 
         if inference_params is not None:
-            assert (
-                mask is not None
-            ), "Mask must be provided if inference_params is provided"
-            assert (
-                ~inference_params.has_seen_tokens
-            ).all(), "Cannot have seen tokens when inference_params is not provided"
+            assert mask is not None, (
+                "Mask must be provided if inference_params is provided"
+            )
+            assert (~inference_params.has_seen_tokens).all(), (
+                "Cannot have seen tokens when inference_params is not provided"
+            )
 
         if cu_seqlens is not None:
             # We are in packed mode, so hidden_states is (T, D). Make it (B, T, D)
@@ -165,11 +164,10 @@ class RoutingModule(nn.Module):
 
 
 class ChunkLayer(nn.Module):
-
     def forward(self, hidden_states, boundary_mask, cu_seqlens=None, mask=None):
-        assert (mask is not None) or (
-            cu_seqlens is not None
-        ), "Either mask or cu_seqlens must be provided"
+        assert (mask is not None) or (cu_seqlens is not None), (
+            "Either mask or cu_seqlens must be provided"
+        )
 
         if cu_seqlens is not None:
             next_hidden_states = hidden_states[boundary_mask]
@@ -211,7 +209,6 @@ class ChunkLayer(nn.Module):
 
 
 class DeChunkLayer(nn.Module):
-
     def __init__(
         self,
         d_model,
@@ -246,12 +243,12 @@ class DeChunkLayer(nn.Module):
         mask=None,
     ):
         if inference_params is not None:
-            assert (
-                mask is not None
-            ), "Mask must be provided if inference_params is provided"
-            assert boundary_mask[
-                :, 0
-            ].all(), "First token must be a boundary if running prefill"
+            assert mask is not None, (
+                "Mask must be provided if inference_params is provided"
+            )
+            assert boundary_mask[:, 0].all(), (
+                "First token must be a boundary if running prefill"
+            )
 
         p = torch.clamp(boundary_prob[..., -1].float(), min=1e-4, max=1 - (1e-4))
 

@@ -4,16 +4,16 @@ from typing import Union, Optional
 import torch
 import torch.nn as nn
 
-from hnet.modules.isotropic import Isotropic, IsotropicInferenceParams
-from hnet.modules.dc import (
+from ..modules.isotropic import Isotropic, IsotropicInferenceParams
+from ..modules.dc import (
     RoutingModule,
     ChunkLayer,
     DeChunkLayer,
     RoutingModuleState,
     DeChunkState,
 )
-from hnet.modules.utils import apply_optimization_params
-from hnet.modules.utils import FlopsCounter
+from ..modules.utils import apply_optimization_params
+from ..modules.utils import FlopsCounter
 from omegaconf import OmegaConf
 
 from .config_hnet import HNetConfig

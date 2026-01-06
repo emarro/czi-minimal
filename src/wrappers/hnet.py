@@ -1,12 +1,12 @@
 import torch
 from caduceus.caduceus import CaduceusTokenizer
-from hnet.models.mixer_seq import HNetForCausalLM
-from hnet.models.config_hnet import (
+from hnet.hnet.models.mixer_seq import HNetForCausalLM
+from hnet.hnet.models.config_hnet import (
     AttnConfig,
     SSMConfig,
     HNetConfig,
 )
-from hnet.utils.tokenizers import ByteTokenizer
+from hnet.hnet.utils.tokenizers import ByteTokenizer
 from omegaconf import OmegaConf
 from wrappers.composer import ComposerWrapper
 
