@@ -170,10 +170,18 @@ class ComposerWrapper(HuggingFaceModel):
             alt_bp = batch["alt_id"]  # [B]
             input_ids = batch["input_ids"]  # [B, L]
             var_idx = seq_len // 2
-            if not torch.all(input_ids[:, var_idx] == ref_bp):
+            if not torch.all(input_ids[:, var_idx] == ref_bp) and not torch.all(
+                input_ids[:, var_idx - 1] == ref_bp
+            ):
                 var_idx -= 1
+
+            elif not torch.all(input_ids[:, var_idx] == ref_bp) and not torch.all(
+                input_ids[:, var_idx + 1] == ref_bp
+            ):
+                var_idx += 1
+
             assert torch.all(input_ids[:, var_idx] == ref_bp), (
-                f"REF bps from batch do not match the input ids, IDS: {input_ids[:, var_idx - 1 : var_idx + 2]}, ref_bps: {ref_bp}"
+                f"REF bps from batch do not match the input ids, IDS: {input_ids[:, var_idx - 2 : var_idx + 3]}, ref_bps: {ref_bp}"
             )
             assert torch.all(ref_bp != alt_bp), (
                 "Not all REF and  ALT bps are different, error in pre-processing"
