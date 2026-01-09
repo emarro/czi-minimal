@@ -1,0 +1,34 @@
+# @package _global_
+# let the experiment node modify configs globally
+defaults:
+  - override /model: mlm_small
+  - override /trainer: fixed_batch
+  - override /dataset: hg38_512
+  - override /eval_dataset: clinvar
+  - override /loggers: wandb
+
+
+tags: ["mlm", "baseline", "nomask"]
+
+
+optimizer:
+  lr: 5e-4
+
+dataset:
+  mask_replace_prob: 0.00 # prob of replacing a masked token with [MASK]
+  random_replace_prob: 0.10 #prob of replacing a masked token with another token in the vocab
+
+task_name: "baseline_hg38_nomask_flip_prob_${dataset.random_replace_prob}"
+
+
+trainer:
+  device_train_microbatch_size: "auto"  #depends on the amount of GPU mem available
+  max_duration: "25ep"
+  eval_interval: "250ba"  # Evaluate every 5k batches
+  global_train_batch_size: 2048
+
+    
+loggers:
+  wandb:
+    project: "Hnet hg38"
+    tags: ${tags}

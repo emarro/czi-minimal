@@ -1,0 +1,36 @@
+# @package _global_
+# let the experiment node modify configs globally
+defaults:
+  - override /model: cnet_small
+  - override /trainer: fixed_batch
+  - override /dataset: hg38_512
+  - override /eval_dataset: clinvar
+  - override /loggers: wandb
+
+tags: ["cnet", "vary_N", "hg38", "nomask"]
+
+hydra:
+  mode: "MULTIRUN"
+  sweeper:
+    # hyperparams to search over
+    params:
+      model.default_target_ratio: 2, 3, 5, 10, 15, null
+
+dataset:
+  mask_replace_prob: 0.00 # prob of replacing a masked token with [MASK]
+  random_replace_prob: 0.10 #prob of replacing a masked token with another token in the vocab
+
+
+task_name: "sweep_N_hg38_nomask_flip_prob_${dataset.random_replace_prob}"
+
+optimizer:
+  lr: 5e-4
+
+trainer:
+  device_train_microbatch_size: 128 #depends on the amount of GPU mem available
+  max_duration: "25ep"
+
+loggers:
+  wandb:
+    project: "Hnet hg38"
+    tags: ${tags}
