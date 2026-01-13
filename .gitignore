@@ -213,3 +213,6 @@ wandb/*
 
 # VS Code settings from interactive dev sessions
 .vscode/*
+
+#path for some local data to process
+local_data/*
