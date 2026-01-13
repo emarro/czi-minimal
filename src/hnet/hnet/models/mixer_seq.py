@@ -7,13 +7,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from flash_attn.utils.generation import GenerationMixin
+from transformers import PreTrainedModel
 
-from .hnet import HNet, HNetState
-from .config_hnet import HNetConfig
+from hnet.hnet.models.hnet import HNet, HNetState
+from hnet.hnet.models.config_hnet import HNetConfig
 
-from ..modules.dc import RoutingModuleOutput
-from ..modules.utils import apply_optimization_params
-from ..modules.utils import FlopsCounter
+from hnet.hnet.modules.dc import RoutingModuleOutput
+from hnet.hnet.modules.utils import apply_optimization_params
+from hnet.hnet.modules.utils import FlopsCounter
 
 
 @dataclass
@@ -70,7 +71,7 @@ def weighted_cross_entropy(
     return ce * (loss_weights / loss_weights.sum())  # .sum()  # [1]
 
 
-class HNetForCausalLM(nn.Module, GenerationMixin):
+class HNetForCausalLM(PreTrainedModel):
     def __init__(
         self,
         config: HNetConfig,
@@ -83,7 +84,7 @@ class HNetForCausalLM(nn.Module, GenerationMixin):
         d_embed = self.config.d_model[0]
         factory_kwargs = {"device": device, "dtype": dtype}
 
-        super().__init__()
+        super().__init__(config)
 
         # Flop counter to estimate the FLOPs per forward pass
         self.flops_counter = FlopsCounter(device)
@@ -212,6 +213,7 @@ class HNetForCausalLM(nn.Module, GenerationMixin):
         ar_loss = None
         ratio_loss_sum = None
         unreduced_ar_loss = None
+        print(f"Model config: {self.config}")
         if labels is not None:
             # Standard AR loss (or weighted version of ar loss)
             if loss_weights is not None:
