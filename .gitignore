@@ -208,6 +208,7 @@ __marimo__/
 
 # Hydra
 outputs/*
+src/outputs/*
 # wandb logs
 wandb/*
 
