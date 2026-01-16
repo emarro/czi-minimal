@@ -79,7 +79,7 @@ class ChrChunker(Callback):
         if self.repo_id is not None:
             api = HfApi()
             commit_info = api.upload_file(
-                path_or_file_obj=filepath,
+                path_or_fileobj=filepath,
                 path_in_repo=f"boundary_logs/{self.target_eval_label}/{filename}",
                 repo_id=self.repo_id,
                 commit_message=f"Uploaded boundaries for {self.target_eval_label} at step {step}",
