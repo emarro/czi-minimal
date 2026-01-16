@@ -7,3 +7,4 @@ seq_len: 512
 target: "PearsonCorrCoef"
 label: "maize_allele_freq"
 log_only_N: 200 #number of examples to log
+save_dir: "${paths.output_dir}/boundaries/${eval_dataset.label}/"  #folder to save outputs to
