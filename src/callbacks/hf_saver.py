@@ -542,6 +542,15 @@ class HuggingFaceCompatibleCheckpointing(CheckpointSaver):
                             for k, v in state.eval_metric_values.items()
                         ]
                     )
+                flop_counter_callbacks = [
+                    callback
+                    for callback in state.callbacks
+                    if "total_train_flops" in dir(callback)
+                ]
+                total_train_flops = -1
+                if len(flop_counter_callbacks) > 0:
+                    total_train_flops = flop_counter_callbacks[0].total_train_flops
+                    # print(f"total_train_flops: {total_train_flops:e}")
                 commit_message = (
                     f"Checkpoint @ Epoch {state.timestamp.epoch.value}, "
                     f"Batch {state.timestamp.batch.value}\n\n"
@@ -552,7 +561,7 @@ class HuggingFaceCompatibleCheckpointing(CheckpointSaver):
                     f"\tbatch={state.timestamp.batch.value}\n"
                     f"\tsample={state.timestamp.sample.value}\n"
                     f"\ttoken={state.timestamp.token.value}\n"
-                    f"\ttrain_flops={state.outputs.total_flops.item():e}\n"
+                    f"\ttrain_flops={total_train_flops:e}\n"
                     f"\tepoch_in_iteration={state.timestamp.epoch_in_iteration.value}\n"
                     f"\ttoken_in_iteration={state.timestamp.token_in_iteration.value}\n"
                     f"\tbatch_in_epoch={state.timestamp.batch_in_epoch.value}\n"
