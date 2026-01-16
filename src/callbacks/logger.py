@@ -57,8 +57,19 @@ class ChrChunker(Callback):
             return
         rank = dist.get_global_rank()
         step = state.timestamp.batch
+        flop_counter_callbacks = [
+            callback
+            for callback in state.callbacks
+            if "total_train_flops" in dir(callback)
+        ]
+        total_train_flops = -1
+        if len(flop_counter_callbacks) > 0:
+            total_train_flops = flop_counter_callbacks[0].total_train_flops
+
         # df = pd.DataFrame(self.buffer)
-        filename = f"step{step}_rank{rank}_outputs.parquet"
+        filename = (
+            f"step{step}_rank{rank}_outputs_trainFLOPs_{total_train_flops:e}.parquet"
+        )
         filepath = os.path.join(self.save_dir, filename)
         table = pa.Table.from_pylist(self.buffer)
         pq.write_table(table, filepath)
