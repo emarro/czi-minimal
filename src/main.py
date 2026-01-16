@@ -431,7 +431,10 @@ def run_training(cfg: DictConfig) -> None:
         )
         if cfg.model.get("log_bpreds", False):
             callbacks.append(
-                IGVCallBack(target_eval_label=cfg.eval_dataset.label, log_only_N=200)
+                IGVCallBack(
+                    target_eval_label=cfg.eval_dataset.label,
+                    log_only_N=cfg.eval_dataset.get("log_only_N", 200),
+                )
             )
         eval_dataloaders = [val_loader, zeroshot_val_loader]
 
