@@ -449,7 +449,7 @@ def run_training(cfg: DictConfig) -> None:
 
         eval_dataloaders = [val_loader, zeroshot_val_loader]
 
-    if cfg.model.get("log_bpreds", False) and cfg.maize_dataset is not None:
+    if cfg.model.get("log_bpreds", False) and cfg.get("maize_dataset", None) is not None:
         maize_val_loader = build_dataloader(
             cfg.maize_dataset,
             model.tokenizer,
