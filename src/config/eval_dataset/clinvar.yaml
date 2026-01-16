@@ -6,5 +6,5 @@ eval_interval: "1ep"
 seq_len: 512
 target: "AUROC"
 label: "clinvar"
-log_only_N: 1018
+log_only_N: 100
 save_dir: "${paths.output_dir}/boundaries/${eval_dataset.label}/"  #folder to save outputs to
