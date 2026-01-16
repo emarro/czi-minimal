@@ -327,7 +327,7 @@ def run_training(cfg: DictConfig) -> None:
             save_to_hub=cfg.callbacks.get("save_to_hub"),
             hub_repo_id=cfg.callbacks.get("hub_repo_id"),
             private=cfg.callbacks.get("private", True),
-            weights_only=True,
+            weights_only=False,
             folder=cfg.callbacks.get("save_folder"),
             save_interval=cfg.callbacks.get("save_interval", "1000ba"),
             num_checkpoints_to_keep=cfg.trainer.get("save_num_checkpoints_to_keep", -1),
@@ -431,7 +431,7 @@ def run_training(cfg: DictConfig) -> None:
         )
         if cfg.model.get("log_bpreds", False):
             callbacks.append(
-                IGVCallBack(target_eval_label="maize_allele_freq", log_only_N=200)
+                IGVCallBack(target_eval_label=cfg.eval_dataset.label, log_only_N=200)
             )
         eval_dataloaders = [val_loader, zeroshot_val_loader]
 
@@ -440,7 +440,7 @@ def run_training(cfg: DictConfig) -> None:
             cfg.maize_dataset,
             model.tokenizer,
             cfg.trainer.global_train_batch_size // dist.get_world_size(),
-            split="train",
+            split=cfg.maize_dataset.get("split", "train"),
             eval_only=True,
             mask_seq=False,
             max_seq_len=cfg.model.max_seq_len,
@@ -449,7 +449,7 @@ def run_training(cfg: DictConfig) -> None:
         )
 
         maize_val_loader = Evaluator(
-            label="maize_chr1",
+            label=cfg.maize_dataset.get("label"),
             dataloader=maize_val_loader,
             eval_interval=cfg.maize_dataset.eval_interval,
             metric_names=[],
@@ -461,7 +461,8 @@ def run_training(cfg: DictConfig) -> None:
 
         callbacks.append(
             ChrChunker(
-                target_eval_label="maize_chr1", save_dir=cfg.maize_dataset.save_dir
+                target_eval_label=cfg.maize_dataset.get("label"),
+                save_dir=cfg.maize_dataset.save_dir,
             )
         )
 
