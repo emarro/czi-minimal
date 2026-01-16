@@ -78,6 +78,7 @@ class HNetConfig(PretrainedConfig):
         ratio_loss_weight: float = 0.03,  # alpha in Hnet Paper
         use_return_dict: bool = False,
         log_bpreds: bool = True,
+        selection: str = "cos",
         # auto_map={
         #    "AutoConfig": "hnet.hnet.models.confg_hnet.HNetConfig",
         #    "AutoModel": "hnet.hnet.models.mixer_seq.HNetForCausalLM",
@@ -103,6 +104,7 @@ class HNetConfig(PretrainedConfig):
         self.tie_embeddings = tie_embeddings
         self.ratio_loss_weight = ratio_loss_weight
         self.log_bpreds = log_bpreds
+        self.selection = selection
         # self.auto_map = auto_map
 
     def __repr__(self):

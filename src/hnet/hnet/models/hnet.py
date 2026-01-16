@@ -57,6 +57,7 @@ class HNet(nn.Module):
 
         self.stage_idx = stage_idx
         self.d_model = config.d_model[stage_idx]
+        self.selection = config.selection
         self.flops_counter = flops_counter
 
         arch_layout = config.arch_layout
@@ -103,7 +104,9 @@ class HNet(nn.Module):
             self.add_module(_name, _sub_model)
 
         if not self.is_innermost:
-            self.routing_module = RoutingModule(self.d_model, **factory_kwargs)
+            self.routing_module = RoutingModule(
+                self.d_model, selection=self.selection, **factory_kwargs
+            )
             self.chunk_layer = ChunkLayer()
             self.dechunk_layer = DeChunkLayer(self.d_model)
 

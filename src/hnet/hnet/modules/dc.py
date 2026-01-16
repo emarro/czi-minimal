@@ -45,10 +45,18 @@ class DeChunkState:
 
 
 class RoutingModule(nn.Module):
-    def __init__(self, d_model, device=None, dtype=None):
+    def __init__(self, d_model, selection="cos", device=None, dtype=None):
         self.d_model = d_model
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
+        self.selection = selection
+        if selection == "mlp":
+            self.mlp = nn.Sequential(
+                nn.Linear(self.d_model, self.d_model * 2),
+                nn.GELU(),
+                nn.Linear(self.d_model * 2, 1),
+                nn.Sigmoid(),
+            )
         self.q_proj_layer = nn.Linear(d_model, d_model, bias=False, **factory_kwargs)
         self.k_proj_layer = nn.Linear(d_model, d_model, bias=False, **factory_kwargs)
         with torch.no_grad():
@@ -81,12 +89,14 @@ class RoutingModule(nn.Module):
         if cu_seqlens is not None:
             # We are in packed mode, so hidden_states is (T, D). Make it (B, T, D)
             hidden_states = hidden_states.unsqueeze(0)
-
-        cos_sim = torch.einsum(
-            "b l d, b l d -> b l",
-            F.normalize(self.q_proj_layer(hidden_states[:, :-1]), dim=-1),
-            F.normalize(self.k_proj_layer(hidden_states[:, 1:]), dim=-1),
-        )
+        if self.selection == "cos":
+            cos_sim = torch.einsum(
+                "b l d, b l d -> b l",
+                F.normalize(self.q_proj_layer(hidden_states[:, :-1]), dim=-1),
+                F.normalize(self.k_proj_layer(hidden_states[:, 1:]), dim=-1),
+            )
+        elif self.selection == "mlp":
+            cos_sim = self.mlp(hidden_states)[:, 1:, 0]  # [B,L, 1]
         # this clamp should no-op as long as no precision issues are encountered
         boundary_prob = torch.clamp(((1 - cos_sim) / 2), min=0.0, max=1.0)
 
