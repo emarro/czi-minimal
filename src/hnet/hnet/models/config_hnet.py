@@ -56,10 +56,10 @@ class SSMConfig:
 
 class HNetConfig(PretrainedConfig):
     auto_map = {
-        "AutoConfig": "hnet.hnet.models.confg_hnet.HNetConfig",
-        "AutoModel": "hnet.hnet.models.mixer_seq.HNetForCausalLM",
-        "AutoModelForCausalLM": "hnet.hnet.models.mixer_seq.HNetForCausalLM",
-        "AutoModelForMaskedLM": "hnet.hnet.models.mixer_seq.HNetForCausalLM",
+        "AutoConfig": "models_config_hnet.HNetConfig",
+        "AutoModel": "models_mixer_seq.HNetForCausalLM",
+        "AutoModelForCausalLM": "models_mixer_seq.HNetForCausalLM",
+        "AutoModelForMaskedLM": "models_mixer_seq.HNetForCausalLM",
     }
 
     def __init__(
@@ -78,14 +78,20 @@ class HNetConfig(PretrainedConfig):
         ratio_loss_weight: float = 0.03,  # alpha in Hnet Paper
         use_return_dict: bool = False,
         log_bpreds: bool = True,
-        auto_map={
-            "AutoConfig": "hnet.hnet.models.confg_hnet.HNetConfig",
-            "AutoModel": "hnet.hnet.models.mixer_seq.HNetForCausalLM",
-            "AutoModelForCausalLM": "hnet.hnet.models.mixer_seq.HNetForCausalLM",
-            "AutoModelForMaskedLM": "hnet.hnet.models.mixer_seq.HNetForCausalLM",
-        },
+        # auto_map={
+        #    "AutoConfig": "hnet.hnet.models.confg_hnet.HNetConfig",
+        #    "AutoModel": "hnet.hnet.models.mixer_seq.HNetForCausalLM",
+        #    "AutoModelForCausalLM": "hnet.hnet.models.mixer_seq.HNetForCausalLM",
+        #    "AutoModelForMaskedLM": "hnet.hnet.models.mixer_seq.HNetForCausalLM",
+        # },
+        *args,
+        **kwargs,
     ):
-        super().__init__(return_dict=use_return_dict, pad_token_id=pad_token_id)
+        if "return_dict" in kwargs:
+            del kwargs["return_dict"]
+        super().__init__(
+            *args, return_dict=use_return_dict, pad_token_id=pad_token_id, **kwargs
+        )
         self.arch_layout = arch_layout
         self.d_model = (
             d_model  # intermediate dimension for the FFNs (0 indicates no FFN)
