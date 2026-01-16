@@ -6,6 +6,7 @@ arch_layout: ["m3t1",["M15"],"m4"] #architecture for DNA from Table 7 with best 
 d_model: [768, 768] #d_model of each stage (matches stages from arch_layout)
 d_intermediate: [768, 1024] # size of FFN sizes corresponding to above
 vocab_size: 16
+selection: "cos"
 ssm_cfg:
   chunk_size: 256
   d_conv: 4
