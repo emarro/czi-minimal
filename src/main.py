@@ -34,7 +34,7 @@ from composer.profiler.profiler import Profiler
 from callbacks.flop_counter import FlopMonitor, BPredMonitor
 from callbacks.visualizer import IGVCallBack
 from callbacks.logger import ChrChunker
-# from callbacks.hf_saver import HuggingFaceCompatibleCheckpointing
+from callbacks.hf_saver import HuggingFaceCompatibleCheckpointing
 
 
 logger = logging.getLogger(__name__)
@@ -314,25 +314,25 @@ def run_training(cfg: DictConfig) -> None:
     callbacks = [
         LRMonitor(),
         SpeedMonitor(window_size=100),
-        CheckpointSaver(
-            weights_only=False,
-            folder=cfg.trainer.get("save_folder"),
-            save_interval=cfg.trainer.get("save_interval", "1000ba"),
-            num_checkpoints_to_keep=cfg.trainer.get("save_num_checkpoints_to_keep", -1),
-            overwrite=cfg.trainer.get("save_overwrite", False),
-        ),
-        # WIP
-        # HuggingFaceCompatibleCheckpointing(
-        #    disable_hf=cfg.callbacks.get("disable_hf"),
-        #    save_local=cfg.callbacks.get("save_local"),
-        #    save_to_hub=cfg.callbacks.get("save_to_hub"),
-        #    hub_repo_id=cfg.callbacks.get("hub_repo_id"),
-        #    weights_only=True,
-        #    folder=cfg.callbacks.get("save_folder"),
-        #    save_interval=cfg.callbacks.get("save_interval", "1000ba"),
+        # CheckpointSaver(
+        #    weights_only=False,
+        #    folder=cfg.trainer.get("save_folder"),
+        #    save_interval=cfg.trainer.get("save_interval", "1000ba"),
         #    num_checkpoints_to_keep=cfg.trainer.get("save_num_checkpoints_to_keep", -1),
         #    overwrite=cfg.trainer.get("save_overwrite", False),
         # ),
+        HuggingFaceCompatibleCheckpointing(
+            disable_hf=cfg.callbacks.get("disable_hf"),
+            save_local=cfg.callbacks.get("save_local"),
+            save_to_hub=cfg.callbacks.get("save_to_hub"),
+            hub_repo_id=cfg.callbacks.get("hub_repo_id"),
+            private=cfg.callbacks.get("private", True),
+            weights_only=True,
+            folder=cfg.callbacks.get("save_folder"),
+            save_interval=cfg.callbacks.get("save_interval", "1000ba"),
+            num_checkpoints_to_keep=cfg.trainer.get("save_num_checkpoints_to_keep", -1),
+            overwrite=cfg.trainer.get("save_overwrite", False),
+        ),
         RuntimeEstimator(),
         MemoryMonitor(),
         FlopMonitor(),
@@ -435,7 +435,7 @@ def run_training(cfg: DictConfig) -> None:
             )
         eval_dataloaders = [val_loader, zeroshot_val_loader]
 
-    if cfg.maize_dataset is not None and cfg.model.get("log_bpreds", False):
+    if cfg.model.get("log_bpreds", False) and cfg.maize_dataset is not None:
         maize_val_loader = build_dataloader(
             cfg.maize_dataset,
             model.tokenizer,

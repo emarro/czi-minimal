@@ -9,7 +9,7 @@ defaults:
   # loggers to use (wandb)
   - loggers: null
   # callbacks to use with trainer (not implemented)
-  - callbacks: null
+  - callbacks: hf_saver
   - trainer: default
   - optimizer: decoupled_adamw
   - scheduler: cosine_annealing_with_warmup
