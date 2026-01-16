@@ -434,6 +434,7 @@ class HuggingFaceCompatibleCheckpointing(CheckpointSaver):
         save_local: bool = True,
         save_to_hub: bool = False,
         hub_repo_id: str | None = None,
+        private: bool = True,
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -444,6 +445,7 @@ class HuggingFaceCompatibleCheckpointing(CheckpointSaver):
             raise ValueError("Saving to hub requires a hub repo id be provided.")
         self.save_local = save_local and not disable_hf
         self.disable_hf = disable_hf or not (self.save_to_hub or self.save_local)
+        self.private = private
         self.project_root = None
         self.hf_filename = PartialFilePath(
             f"HF_{self.filename.filename.split('.pt')[0]}", self.filename.folder
@@ -522,6 +524,7 @@ class HuggingFaceCompatibleCheckpointing(CheckpointSaver):
                     repo_id=save_hf_filename,
                     local=True,
                     project_root=self.project_root,
+                    private=self.private,
                 )
                 saved_hf_path = save_hf_filename
                 log.debug(f"HF checkpoint locally saved to {saved_hf_path}")
@@ -549,6 +552,7 @@ class HuggingFaceCompatibleCheckpointing(CheckpointSaver):
                     f"\tbatch={state.timestamp.batch.value}\n"
                     f"\tsample={state.timestamp.sample.value}\n"
                     f"\ttoken={state.timestamp.token.value}\n"
+                    f"\ttrain_flops={state.outputs.total_flops.item()}\n"
                     f"\tepoch_in_iteration={state.timestamp.epoch_in_iteration.value}\n"
                     f"\ttoken_in_iteration={state.timestamp.token_in_iteration.value}\n"
                     f"\tbatch_in_epoch={state.timestamp.batch_in_epoch.value}\n"
@@ -566,6 +570,7 @@ class HuggingFaceCompatibleCheckpointing(CheckpointSaver):
                     local=False,
                     project_root=self.project_root,
                     commit_message=commit_message,
+                    private=self.private,
                 )
             log.debug(f"HF checkpoint pushed to {self.hub_repo_id}")
 
