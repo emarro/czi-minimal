@@ -6,6 +6,7 @@ arch_layout: ["M3T1M19"] #architecture for DNA from Table 7 with best PPL in HNe
 d_model: [512] #d_model of each stage (matches stages from arch_layout)
 d_intermediate: [768] # size of FFN sizes for MLP corresponding to above
 vocab_size: 16
+selection: null
 ssm_cfg:
   chunk_size: 256
   d_conv: 4

@@ -6,6 +6,7 @@ arch_layout: ["M23"] #architecture for DNA from Table 7 with best PPL in HNet pa
 d_model: [1024] #d_model of each stage (matches stages from arch_layout)
 d_intermediate: [1536] # size of FFN sizes for MLP corresponding to above
 vocab_size: 16
+selection: null
 ssm_cfg:
   chunk_size: 256
   d_conv: 4
