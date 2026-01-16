@@ -14,9 +14,9 @@ def register_resolvers():
     if not OmegaConf.has_resolver("clean"):
         OmegaConf.register_new_resolver(
             name="clean",
-            resolver=lambda s, replace="": re.sub(
-                r"[\'\",\\s=\[\]]+", replace, s
-            ).replace(" ", "-")
+            resolver=lambda s, replace="": re.sub(r"[\'\",\\s=\[\]]+", replace, s)
+            .replace(" ", "-")
+            .replace(".", "_")
             if s is not None
             else s,
         )
