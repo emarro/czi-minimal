@@ -8,17 +8,23 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 from typing import Optional
-
+from huggingface_hub import HfApi
 
 import os
 
 
 class ChrChunker(Callback):
-    def __init__(self, target_eval_label: str, save_dir: os.PathLike):
+    def __init__(
+        self,
+        target_eval_label: str,
+        save_dir: os.PathLike,
+        repo_id: Optional[str] = None,
+    ):
         super().__init__()
         self.target_eval_label = target_eval_label
         self.save_dir = save_dir
         self.buffer = []
+        self.repo_id = repo_id
 
     def eval_batch_end(self, state, logger):
         if state.dataloader_label != self.target_eval_label:
@@ -51,9 +57,19 @@ class ChrChunker(Callback):
             return
         rank = dist.get_global_rank()
         step = state.timestamp.batch
-        df = pd.DataFrame(self.buffer)
+        # df = pd.DataFrame(self.buffer)
         filename = f"step{step}_rank{rank}_outputs.parquet"
         filepath = os.path.join(self.save_dir, filename)
         table = pa.Table.from_pylist(self.buffer)
         pq.write_table(table, filepath)
         # df.to_csv(filepath)
+
+        if self.repo_id is not None:
+            api = HfApi()
+            commit_info = api.upload_file(
+                path_or_file_obj=filepath,
+                path_in_repo=f"boundary_logs/{self.target_eval_label}/{filename}",
+                repo_id=self.repo_id,
+                commit_message=f"Uploaded boundaries for {self.target_eval_label} at step {step}",
+            )
+            # log.debug(f"Commit info: {commit_info}")
