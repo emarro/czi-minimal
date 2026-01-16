@@ -3,7 +3,7 @@ data_remote: "emarro/maize_chr1_512" #"emarro/maize-allele-frequency-20k-val"
 repeat_weight: 0.1
 num_workers: 1
 eval_interval: "1ep" #chunk and save boundaries every batch
-save_dir: "${paths.output_dir}/checkpoints/boundaries/"  #folder to save outputs to
+save_dir: "${paths.output_dir}/boundaries/${maize_dataset.label}"  #folder to save outputs to
 seq_len: 512
 label: "maize_chr1"
 split: "train"
