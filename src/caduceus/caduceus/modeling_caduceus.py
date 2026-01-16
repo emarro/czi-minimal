@@ -38,8 +38,13 @@ except ImportError:
     except ImportError:
         RMSNorm, layer_norm_fn, rms_norm_fn = None, None, None
 
-from .configuration_caduceus import CaduceusConfig
-from .modeling_rcps import RCPSAddNormWrapper, RCPSEmbedding, RCPSLMHead, RCPSMambaBlock
+from caduceus.caduceus.configuration_caduceus import CaduceusConfig
+from caduceus.caduceus.modeling_rcps import (
+    RCPSAddNormWrapper,
+    RCPSEmbedding,
+    RCPSLMHead,
+    RCPSMambaBlock,
+)
 
 
 def create_block(
