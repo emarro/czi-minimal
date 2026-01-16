@@ -23,6 +23,7 @@ class ChrChunker(Callback):
         super().__init__()
         self.target_eval_label = target_eval_label
         self.save_dir = save_dir
+        os.makedirs(save_dir, exist_ok=True)
         self.buffer = []
         self.repo_id = repo_id
 
