@@ -430,12 +430,23 @@ def run_training(cfg: DictConfig) -> None:
             device_eval_microbatch_size=cfg.trainer.device_train_microbatch_size,
         )
         if cfg.model.get("log_bpreds", False):
+            if "wandb" in cfg.get("loggers", {}):
+                callbacks.append(
+                    IGVCallBack(
+                        target_eval_label=cfg.eval_dataset.label,
+                        log_only_N=cfg.eval_dataset.get("log_only_N", 200),
+                    )
+                )
             callbacks.append(
-                IGVCallBack(
-                    target_eval_label=cfg.eval_dataset.label,
-                    log_only_N=cfg.eval_dataset.get("log_only_N", 200),
+                ChrChunker(
+                    target_eval_label=cfg.eval_dataset.get("label"),
+                    save_dir=cfg.eval_dataset.save_dir,
+                    repo_id=cfg.callbacks.get("hub_repo_id", None)
+                    if "callbacks" in cfg and not cfg.callbacks.get("disable_hf", False)
+                    else None,
                 )
             )
+
         eval_dataloaders = [val_loader, zeroshot_val_loader]
 
     if cfg.model.get("log_bpreds", False) and cfg.maize_dataset is not None:
@@ -466,6 +477,9 @@ def run_training(cfg: DictConfig) -> None:
             ChrChunker(
                 target_eval_label=cfg.maize_dataset.get("label"),
                 save_dir=cfg.maize_dataset.save_dir,
+                repo_id=cfg.callbacks.get("hub_repo_id", None)
+                if "callbacks" in cfg and not cfg.callbacks.get("disable_hf", False)
+                else None,
             )
         )
 
