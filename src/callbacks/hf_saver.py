@@ -22,6 +22,7 @@ from types import MethodType
 import fsspec
 from huggingface_hub import HfApi, file_exists, repo_exists
 from transformers import PreTrainedModel, PreTrainedTokenizer
+from transformers import AutoModel, AutoTokenizer
 
 log = logging.getLogger(__name__)
 
@@ -136,6 +137,7 @@ def _flatten_and_copy(src_path: Path, dest_path: Path, ignore: list[str]) -> Non
         All instances of `src.` are replaced with `.` and all `.` (after the first one)
             in relative imports are replaced with `_`.
         """
+        # print(f"Flattening imports in {src}")
         with open(src, "r", encoding="utf-8") as f:
             lines = f.readlines()
         modified_lines = []
@@ -148,6 +150,8 @@ def _flatten_and_copy(src_path: Path, dest_path: Path, ignore: list[str]) -> Non
                     lambda m: f"import {m.group(1).replace('.', '_')}",
                     line,
                 )
+                assert modified_line[0] != "_", f"Line {modified_line} invalid import"
+
             # Match lines starting with "from ."
             elif re.match(r"^\s*from\s+\.(\S+)\s+import", line):
                 # Replace all remaining '.' with '_'
@@ -156,28 +160,85 @@ def _flatten_and_copy(src_path: Path, dest_path: Path, ignore: list[str]) -> Non
                     lambda m: f"from {m.group(1).replace('.', '_')}",
                     line,
                 )
-            # Match lines starting with "import src."
-            elif re.match(r"^\s*import\s+src\.(\S+)\s*$", line):
-                # Replace 'import src.' with 'import .'
-                modified_line = re.sub(r"^\s*import\s+src\.", "import .", line)
+                if modified_line[0] == "_":
+                    modified_line = modified_line.replace("_", ".", 1)
+                assert modified_line[0] != "_", f"Line {modified_line} invalid import"
+
+            # Match lines starting with "import hnet."
+            elif re.match(r"^\s*import\s+hnet\.(\S+)\s*$", line):
+                # Replace 'import hnet.' with 'import .'
+                modified_line = re.sub(r"^\s*import\s+hnet\.hnet\.", "import .", line)
                 # Replace all remaining '.' with '_'
                 modified_line = re.sub(
                     r"^import \.([\w.]+)",
                     lambda m: f"import .{m.group(1).replace('.', '_')}",
                     modified_line,
                 )
-            # Match lines starting with "from src."
-            elif re.match(r"^\s*from\s+src\.(\S+)\s+import", line):
-                # Replace 'from src.' with 'from .'
-                modified_line = re.sub(r"^\s*from\s+src\.", "from .", line)
+                # assert False, f"subbed {line} -> {modified_line}"
+                if modified_line.encode("utf-8")[0] == "_":
+                    modified_line = modified_line.replace("_", ".", 1)
+                assert modified_line[0] != "_", f"Line {modified_line} invalid import"
+                assert "." not in modified_line, f"Line {modified_line} invalid import"
+
+            # Match lines starting with "from hnet."
+            elif re.match(r"^\s*from\s+hnet\.(\S+)\s+import", line):
+                # Replace 'from hnet.' with 'from .'
+                modified_line = re.sub(r"^\s*from\s+hnet\.hnet\.", "from .", line)
                 # Replace all remaining '.' with '_'
                 modified_line = re.sub(
                     r"^from \.([\w.]+)",
                     lambda m: f"from .{m.group(1).replace('.', '_')}",
                     modified_line,
+                )  # .replace("_", ".", 1)
+                # assert False, f"subbed {line} -> {modified_line}"
+                if modified_line.encode("utf-8")[0] == "_":
+                    modified_line = modified_line.replace("_", ".", 1)
+                assert modified_line[0] != "_", f"Line {modified_line} invalid import"
+                # assert "_" not in modified_line[0:2], (
+                #    f"Line {modified_line} invalid import"
+                # )
+
+            # Match lines starting with "import caduceus."
+            elif re.match(r"^\s*import\s+caduceus\.(\S+)\s*$", line):
+                # Replace 'import caduceus.' with 'import .'
+                modified_line = re.sub(
+                    r"^\s*import\s+caduceus\.caduceus\.", "import .caduceus.", line
                 )
+                # Replace all remaining '.' with '_'
+                modified_line = re.sub(
+                    r"^import \.([\w.]+)",
+                    lambda m: f"import .{m.group(1).replace('.', '_')}",
+                    modified_line,
+                )
+                # assert False, f"subbed {line} -> {modified_line}"
+                if modified_line.encode("utf-8")[0] == "_":
+                    modified_line = modified_line.replace("_", ".", 1)
+                assert modified_line[0] != "_", f"Line {modified_line} invalid import"
+                assert "." not in modified_line, f"Line {modified_line} invalid import"
+
+            # Match lines starting with "from caduceus."
+            elif re.match(r"^\s*from\s+caduceus\.(\S+)\s+import", line):
+                # Replace 'from caduceus.' with 'from .'
+                modified_line = re.sub(
+                    r"^\s*from\s+caduceus\.caduceus\.", "from .caduceus.", line
+                )
+                # Replace all remaining '.' with '_'
+                modified_line = re.sub(
+                    r"^from \.([\w.]+)",
+                    lambda m: f"from .{m.group(1).replace('.', '_')}",
+                    modified_line,
+                )  # .replace("_", ".", 1)
+                # assert False, f"subbed {line} -> {modified_line}"
+                if modified_line.encode("utf-8")[0] == "_":
+                    modified_line = modified_line.replace("_", ".", 1)
+                assert modified_line[0] != "_", f"Line {modified_line} invalid import"
+                # assert "_" not in modified_line[0:2], (
+                #    f"Line {modified_line} invalid import"
+                # )
+
             else:
                 modified_line = line
+
             modified_lines.append(modified_line.encode("utf-8"))
         with open(
             dest,
@@ -187,9 +248,13 @@ def _flatten_and_copy(src_path: Path, dest_path: Path, ignore: list[str]) -> Non
 
     if any([Path(src_path).match(ignore_file) for ignore_file in ignore]):
         log.debug("Skipping:", src_path)
+        # print("Skipping:", src_path)
         return
     if os.path.isdir(src_path):
         for sp in fsspec_listdir(src_path):
+            # print(
+            # f"Copying and flattening {sp} to -> {Path(f'{str(dest_path)}_{Path(sp).resolve().name}')}"
+            # )
             _flatten_and_copy(
                 src_path / sp,
                 Path(f"{str(dest_path)}_{Path(sp).resolve().name}"),
@@ -527,6 +592,11 @@ class HuggingFaceCompatibleCheckpointing(CheckpointSaver):
             if self.rank_saves_symlinks:
                 os.symlink(os.path.relpath(src_path, os.path.dirname(symlink)), symlink)
         self.saved_hf_checkpoints.append(saved_hf_path)
+        # Debug: Load from HF
+        print(f"Loading model saved at: {str(saved_hf_path)}")
+        AutoModel.from_pretrained(saved_hf_path, trust_remote_code=True)
+        print(f"Loading Tokenizer saved at: {str(saved_hf_path)}")
+        AutoTokenizer.from_pretrained(saved_hf_path, trust_remote_code=True)
 
         if self.num_checkpoints_to_keep >= 0:
             # Adapting `super().__rotate_checkpoints` for HF
@@ -538,7 +608,6 @@ class HuggingFaceCompatibleCheckpointing(CheckpointSaver):
                 else:
                     if dist.get_global_rank() == 0:
                         shutil.rmtree(prefix_dir)
-        super()._save_checkpoint(state, logger)  # Perform standard checkpointing
 
     def close(self, state: State, logger: Logger) -> None:
         """Clean up tmp repo snapshot"""
