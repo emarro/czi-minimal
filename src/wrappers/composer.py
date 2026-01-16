@@ -106,9 +106,9 @@ class ComposerWrapper(HuggingFaceModel):
         ):  # not in the zero-shot eval task
             val = None
             if metric.tag == "ar":
-                val = outputs.ar_loss if not self.mlm else None
+                val = outputs.ar_loss  # if not self.mlm else None
             elif metric.tag == "ratio":
-                val = outputs.ratio_loss if not self.mlm else None
+                val = outputs.ratio_loss  # if not self.mlm else None
             elif metric.tag == "acc":
                 B, L, V = outputs.logits.shape
                 preds = outputs.logits.softmax(dim=-1).argmax(dim=-1)
