@@ -11,10 +11,10 @@ import torch.nn as nn
 
 from flash_attn.ops.triton.layer_norm import RMSNorm
 
-from .block import create_block
-from .utils import get_seq_idx, get_stage_cfg
+from hnet.hnet.modules.block import create_block
+from hnet.hnet.modules.utils import get_seq_idx, get_stage_cfg
 
-from ..models.config_hnet import HNetConfig
+from hnet.hnet.models.config_hnet import HNetConfig
 
 
 @dataclass

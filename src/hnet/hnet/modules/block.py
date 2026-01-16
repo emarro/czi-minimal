@@ -9,12 +9,12 @@ from flash_attn.ops.triton.layer_norm import RMSNorm
 from mamba_ssm.modules.mamba2 import Mamba2
 
 # TODO: this is just the bimamba wrapper, still need RCPS
-from caduceus.caduceus import CaduceusConfig
-from caduceus.caduceus import BiMambaWrapper as Caduceus
+from caduceus.caduceus.configuration_caduceus import CaduceusConfig
+from caduceus.caduceus.modeling_caduceus import BiMambaWrapper as Caduceus
 
 
-from .mha import CausalMHA
-from .mlp import SwiGLU
+from hnet.hnet.modules.mha import CausalMHA
+from hnet.hnet.modules.mlp import SwiGLU
 
 
 class Mamba2Wrapper(Mamba2):

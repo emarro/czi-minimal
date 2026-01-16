@@ -12,7 +12,7 @@ from flash_attn import (
     flash_attn_with_kvcache,
 )
 
-from .rotary import RotaryEmbedding
+from hnet.hnet.modules.rotary import RotaryEmbedding
 
 
 class FlashCausalSelfAttention(nn.Module):

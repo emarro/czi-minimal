@@ -15,6 +15,28 @@ from hnet.hnet.models.config_hnet import HNetConfig
 from hnet.hnet.modules.dc import RoutingModuleOutput
 from hnet.hnet.modules.utils import apply_optimization_params
 from hnet.hnet.modules.utils import FlopsCounter
+from hnet.hnet.modules.isotropic import (
+    Isotropic,
+)  # Empty import to ensure isotropic.py gets copied to HF
+from hnet.hnet.modules.block import (
+    create_block,
+)  # Empty import to ensure block.py gets copied to HF
+from hnet.hnet.modules.utils import (
+    get_seq_idx,
+    get_stage_cfg,
+)  # Empty import to ensure utils.py gets copied to HF
+
+
+from hnet.hnet.modules.mha import CausalMHA
+from hnet.hnet.modules.mlp import SwiGLU
+from hnet.hnet.modules.rotary import RotaryEmbedding
+
+# from caduceus.caduceus.configuration_caduceus import CaduceusConfig
+# from caduceus.caduceus.modeling_caduceus import BiMambaWrapper as Caduceus
+from caduceus.caduceus.configuration_caduceus import CaduceusConfig
+from caduceus.caduceus.modeling_caduceus import BiMambaWrapper
+from caduceus.caduceus.modeling_rcps import RCPSWrapper
+from caduceus.caduceus.tokenization_caduceus import CaduceusTokenizer
 
 
 @dataclass
@@ -72,6 +94,8 @@ def weighted_cross_entropy(
 
 
 class HNetForCausalLM(PreTrainedModel):
+    config_class = HNetConfig
+
     def __init__(
         self,
         config: HNetConfig,
@@ -213,7 +237,7 @@ class HNetForCausalLM(PreTrainedModel):
         ar_loss = None
         ratio_loss_sum = None
         unreduced_ar_loss = None
-        print(f"Model config: {self.config}")
+        # print(f"Model config: {self.config}")
         if labels is not None:
             # Standard AR loss (or weighted version of ar loss)
             if loss_weights is not None:

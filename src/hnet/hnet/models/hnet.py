@@ -4,19 +4,19 @@ from typing import Union, Optional
 import torch
 import torch.nn as nn
 
-from ..modules.isotropic import Isotropic, IsotropicInferenceParams
-from ..modules.dc import (
+from hnet.hnet.modules.isotropic import Isotropic, IsotropicInferenceParams
+from hnet.hnet.modules.dc import (
     RoutingModule,
     ChunkLayer,
     DeChunkLayer,
     RoutingModuleState,
     DeChunkState,
 )
-from ..modules.utils import apply_optimization_params
-from ..modules.utils import FlopsCounter
+from hnet.hnet.modules.utils import apply_optimization_params
+from hnet.hnet.modules.utils import FlopsCounter
 from omegaconf import OmegaConf
 
-from .config_hnet import HNetConfig
+from hnet.hnet.models.config_hnet import HNetConfig
 
 
 class STE(torch.autograd.Function):
