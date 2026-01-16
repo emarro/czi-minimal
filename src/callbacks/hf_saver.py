@@ -552,7 +552,7 @@ class HuggingFaceCompatibleCheckpointing(CheckpointSaver):
                     f"\tbatch={state.timestamp.batch.value}\n"
                     f"\tsample={state.timestamp.sample.value}\n"
                     f"\ttoken={state.timestamp.token.value}\n"
-                    f"\ttrain_flops={state.outputs.total_flops.item()}\n"
+                    f"\ttrain_flops={state.outputs.total_flops.item():e}\n"
                     f"\tepoch_in_iteration={state.timestamp.epoch_in_iteration.value}\n"
                     f"\ttoken_in_iteration={state.timestamp.token_in_iteration.value}\n"
                     f"\tbatch_in_epoch={state.timestamp.batch_in_epoch.value}\n"
