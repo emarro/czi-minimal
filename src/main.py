@@ -437,15 +437,15 @@ def run_training(cfg: DictConfig) -> None:
                         log_only_N=cfg.eval_dataset.get("log_only_N", 200),
                     )
                 )
-            callbacks.append(
-                ChrChunker(
-                    target_eval_label=cfg.eval_dataset.get("label"),
-                    save_dir=cfg.eval_dataset.save_dir,
-                    repo_id=cfg.callbacks.get("hub_repo_id", None)
-                    if "callbacks" in cfg and not cfg.callbacks.get("disable_hf", False)
-                    else None,
-                )
-            )
+            #callbacks.append(
+            #    ChrChunker(
+            #        target_eval_label=cfg.eval_dataset.get("label"),
+            #        save_dir=cfg.eval_dataset.save_dir,
+            #        repo_id=cfg.callbacks.get("hub_repo_id", None)
+            #        if "callbacks" in cfg and not cfg.callbacks.get("disable_hf", False)
+            #        else None,
+            #    )
+            #)
 
         eval_dataloaders = [val_loader, zeroshot_val_loader]
 
