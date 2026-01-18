@@ -1,13 +1,15 @@
 # @package _global_
 # let the experiment node modify configs globally
 defaults:
-  - override /model: pcad2_small
   - override /loggers: wandb
-  - override /dataset: pcad2
   - override /trainer: fixed_batch
+  - override /model: pcad2_small
+  - override /dataset: hg38_8192
+  - override /eval_dataset: clinvar
 
 
-tags: ["cnet", "baseline"]
+
+tags: ["cnet", "baseline", "hg38"]
 
 
 
@@ -24,4 +26,5 @@ trainer:
 
 loggers:
   wandb:
+    project: "Hnet hg38"
     tags: ${tags}
