@@ -1,17 +1,17 @@
 # @package _global_
 # let the experiment node modify configs globally
 defaults:
-  - override /model: pcad2_small
+  - override /model: pcad2_small_cnet
   - override /loggers: wandb
   - override /dataset: pcad2
   - override /trainer: fixed_batch
 
 
-tags: ["cnet", "baseline"]
+tags: ["cnet", "pcad2"]
 
 
 
-task_name: "pcad2_baseline"
+task_name: "pcad2_cnet"
 
 optimizer:
   lr: 5e-4
