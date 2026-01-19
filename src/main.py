@@ -429,7 +429,7 @@ def run_training(cfg: DictConfig) -> None:
             eval_interval=cfg.eval_dataset.eval_interval,
             device_eval_microbatch_size=cfg.trainer.device_train_microbatch_size,
         )
-        if cfg.model.get("log_bpreds", False):
+        if False and cfg.model.get("log_bpreds", False):
             if "wandb" in cfg.get("loggers", {}):
                 callbacks.append(
                     IGVCallBack(
@@ -449,7 +449,10 @@ def run_training(cfg: DictConfig) -> None:
 
         eval_dataloaders = [val_loader, zeroshot_val_loader]
 
-    if cfg.model.get("log_bpreds", False) and cfg.get("maize_dataset", None) is not None:
+    if (
+        cfg.model.get("log_bpreds", False)
+        and cfg.get("maize_dataset", None) is not None
+    ):
         maize_val_loader = build_dataloader(
             cfg.maize_dataset,
             model.tokenizer,
@@ -473,15 +476,15 @@ def run_training(cfg: DictConfig) -> None:
         if not os.path.exists(cfg.maize_dataset.save_dir):
             os.makedirs(cfg.maize_dataset.save_dir)
 
-        callbacks.append(
-            ChrChunker(
-                target_eval_label=cfg.maize_dataset.get("label"),
-                save_dir=cfg.maize_dataset.save_dir,
-                repo_id=cfg.callbacks.get("hub_repo_id", None)
-                if "callbacks" in cfg and not cfg.callbacks.get("disable_hf", False)
-                else None,
-            )
-        )
+            # callbacks.append(
+            # ChrChunker(
+            #    target_eval_label=cfg.maize_dataset.get("label"),
+            #    save_dir=cfg.maize_dataset.save_dir,
+            #    repo_id=cfg.callbacks.get("hub_repo_id", None)
+            #    if "callbacks" in cfg and not cfg.callbacks.get("disable_hf", False)
+            #    else None,
+            # )
+        # )
 
     # Create trainer; see
     # https://docs.mosaicml.com/projects/composer/en/latest/api_reference/generated/composer.Trainer.html
