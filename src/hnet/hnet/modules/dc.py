@@ -57,13 +57,20 @@ class RoutingModule(nn.Module):
                 nn.Linear(self.d_model * 2, 1),
                 nn.Sigmoid(),
             )
-        self.q_proj_layer = nn.Linear(d_model, d_model, bias=False, **factory_kwargs)
-        self.k_proj_layer = nn.Linear(d_model, d_model, bias=False, **factory_kwargs)
-        with torch.no_grad():
-            self.q_proj_layer.weight.copy_(torch.eye(d_model))
-            self.k_proj_layer.weight.copy_(torch.eye(d_model))
-        self.q_proj_layer.weight._no_reinit = True
-        self.k_proj_layer.weight._no_reinit = True
+        elif selection == "cos":
+            self.q_proj_layer = nn.Linear(
+                d_model, d_model, bias=False, **factory_kwargs
+            )
+            self.k_proj_layer = nn.Linear(
+                d_model, d_model, bias=False, **factory_kwargs
+            )
+            with torch.no_grad():
+                self.q_proj_layer.weight.copy_(torch.eye(d_model))
+                self.k_proj_layer.weight.copy_(torch.eye(d_model))
+            self.q_proj_layer.weight._no_reinit = True
+            self.k_proj_layer.weight._no_reinit = True
+        else:
+            raise Exception(f"Unrecognized selection mechanism {selection}")
 
     def allocate_inference_cache(self, batch_size, max_seqlen, device, dtype=None):
         return RoutingModuleState(
