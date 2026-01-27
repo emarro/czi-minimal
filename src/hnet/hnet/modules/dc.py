@@ -52,11 +52,18 @@ class RoutingModule(nn.Module):
         self.selection = selection
         if selection == "mlp":
             self.mlp = nn.Sequential(
-                nn.Linear(self.d_model, self.d_model * 2),
-                nn.GELU(),
-                nn.Linear(self.d_model * 2, 1),
+                nn.Linear(self.d_model, 1, bias=False),
+                # nn.GELU(),
+                # nn.Linear(self.d_model * 2, 1),
                 nn.Sigmoid(),
             )
+            # self.mlp = nn.Sequential(
+            #    nn.Linear(self.d_model, d_model * 2, bias=False),
+            #    nn.GELU(),
+            #    nn.Linear(self.d_model * 2, 1, bias=False),
+            #    nn.Sigmoid(),
+            # )
+
         elif selection == "cos":
             self.q_proj_layer = nn.Linear(
                 d_model, d_model, bias=False, **factory_kwargs
@@ -102,10 +109,10 @@ class RoutingModule(nn.Module):
                 F.normalize(self.q_proj_layer(hidden_states[:, :-1]), dim=-1),
                 F.normalize(self.k_proj_layer(hidden_states[:, 1:]), dim=-1),
             )
+            boundary_prob = torch.clamp(((1 - cos_sim) / 2), min=0.0, max=1.0)
         elif self.selection == "mlp":
-            cos_sim = self.mlp(hidden_states)[:, 1:, 0]  # [B,L, 1]
+            boundary_prob = self.mlp(hidden_states)[:, 1:, 0]  # [B,L, 1]
         # this clamp should no-op as long as no precision issues are encountered
-        boundary_prob = torch.clamp(((1 - cos_sim) / 2), min=0.0, max=1.0)
 
         # Force boundary probability of the first element to 1.0
         PAD_PROB = 1.0
