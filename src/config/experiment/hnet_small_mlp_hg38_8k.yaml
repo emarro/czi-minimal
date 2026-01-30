@@ -1,0 +1,39 @@
+# @package _global_
+# let the experiment node modify configs globally
+defaults:
+  - override /model: hnet_small_mlp_selection
+  - override /trainer: fixed_batch
+  - override /dataset: hg38_8192
+  - override /eval_dataset: clinvar
+  - override /loggers: wandb
+
+tags: ["hnet", "vary_N", "hg38", "8k"]
+
+hydra:
+  mode: "MULTIRUN"
+  sweeper:
+    # hyperparams to search over
+    params:
+      model.default_target_ratio: 2, 3, 5, 10, 15, null
+
+
+
+task_name: "sweep_N_hg38_8k"
+
+model:
+  max_seq_len: 8192
+
+optimizer:
+  lr: 5e-4
+
+trainer:
+  max_duration: "25ep"
+  global_train_batch_size: 512 # set small for debugging
+  device_train_microbatch_size: 8 # max size for the small model on 48Gb card (6000ada), 16 for h100 
+
+
+
+loggers:
+  wandb:
+    project: "Hnet hg38"
+    tags: ${tags}
