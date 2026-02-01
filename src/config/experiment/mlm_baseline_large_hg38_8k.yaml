@@ -1,0 +1,34 @@
+# @package _global_
+# let the experiment node modify configs globally
+defaults:
+  - override /model: mlm_large
+  - override /trainer: fixed_batch
+  - override /dataset: hg38_8192
+  - override /eval_dataset: clinvar
+  - override /loggers: wandb
+
+
+tags: ["mlm", "baseline", "hg38", "8k"]
+
+task_name: "baseline_hg38_8k"
+
+optimizer:
+  lr: 5e-4
+
+model:
+  max_seq_len: 8192
+
+
+
+trainer:
+  max_duration: "25ep"
+  eval_interval: "250ba"  # Evaluate every 5k batches
+  global_train_batch_size: 512 # set small for debugging
+  device_train_microbatch_size: 4 # max size for the small model on 48Gb card (6000ada), 16 for h100 
+
+
+    
+loggers:
+  wandb:
+    project: "Hnet hg38"
+    tags: ${tags}
