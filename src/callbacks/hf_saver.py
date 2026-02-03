@@ -587,9 +587,9 @@ class HuggingFaceCompatibleCheckpointing(CheckpointSaver):
                 )
             log.debug(f"HF checkpoint pushed to {self.hub_repo_id}")
 
-            # if not saved_hf_path:  # not all ranks save
-            # super()._save_checkpoint(state, logger)  # Perform standard checkpointing
-            # return
+        if not saved_hf_path:  # not all ranks save
+            super()._save_checkpoint(state, logger)  # Perform standard checkpointing
+            return
 
         self.rank_saves_symlinks = (
             dist.get_global_rank() == 0 or not state.fsdp_sharded_state_dict_enabled
