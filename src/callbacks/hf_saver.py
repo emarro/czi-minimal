@@ -499,12 +499,13 @@ class HuggingFaceCompatibleCheckpointing(CheckpointSaver):
         #  (or if we can ignore this scenario).
         # TODO: Do we need to implement HF uploading for remote uploading too?
         # Hacky try/catch to traige errors with removing already deleted ckpts (concurrency bug?)
-        try:
-            super()._save_checkpoint(state, logger)  # Perform standard checkpointing
-        except FileNotFoundError as e:
-            pass
+        # print(f"Super save {1} at batch {state.timestamp.batch.value}")
+        # try:
+        # super()._save_checkpoint(state, logger)  # Perform standard checkpointing
+        # except FileNotFoundError as e:
+        # raise Warning(f"At start of _save_checkpoint, file {e} not found")
         if self.disable_hf:
-            # super()._save_checkpoint(state, logger)  # Perform standard checkpointing
+            super()._save_checkpoint(state, logger)  # Perform standard checkpointing
             # Exit and don't upload to hf
             return
 
@@ -588,6 +589,7 @@ class HuggingFaceCompatibleCheckpointing(CheckpointSaver):
             log.debug(f"HF checkpoint pushed to {self.hub_repo_id}")
 
         if not saved_hf_path:  # not all ranks save
+            # TODO: fix load to update symlink before load? (Sometimes get prempted after save but before symlink update)
             super()._save_checkpoint(state, logger)  # Perform standard checkpointing
             return
 
@@ -611,10 +613,10 @@ class HuggingFaceCompatibleCheckpointing(CheckpointSaver):
                 os.symlink(os.path.relpath(src_path, os.path.dirname(symlink)), symlink)
         self.saved_hf_checkpoints.append(saved_hf_path)
         # Debug: Load from HF
-        print(f"Loading model saved at: {str(saved_hf_path)}")
-        AutoModel.from_pretrained(saved_hf_path, trust_remote_code=True)
-        print(f"Loading Tokenizer saved at: {str(saved_hf_path)}")
-        AutoTokenizer.from_pretrained(saved_hf_path, trust_remote_code=True)
+        # print(f"Loading model saved at: {str(saved_hf_path)}")
+        # AutoModel.from_pretrained(saved_hf_path, trust_remote_code=True)
+        # print(f"Loading Tokenizer saved at: {str(saved_hf_path)}")
+        # AutoTokenizer.from_pretrained(saved_hf_path, trust_remote_code=True)
 
         if self.num_checkpoints_to_keep >= 0:
             # Adapting `super().__rotate_checkpoints` for HF
