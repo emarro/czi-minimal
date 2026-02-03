@@ -1,0 +1,36 @@
+# @package _global_
+# let the experiment node modify configs globally
+defaults:
+  - override /model: cnet_large
+  - override /loggers: wandb
+  - override /dataset: pcad2
+  - override /trainer: fixed_batch
+
+
+tags: ["cnet", "pcad2", "8k", "plant", "ar"]
+
+hydra:
+  mode: "MULTIRUN"
+  sweeper:
+    # hyperparams to search over
+    params:
+      model.default_target_ratio: 2, 3, 5, 6, 10, 15, null
+
+model:
+  max_seq_len: 8192
+
+
+task_name: "pcad2_cnet"
+
+optimizer:
+  lr: 5e-4
+
+trainer:
+  max_duration: "25ep"
+  global_train_batch_size: 512 # set small for debugging
+  device_train_microbatch_size: 4 # max size for the small model on 48Gb card (6000ada), 16 for h100 
+
+loggers:
+  wandb:
+    project: "Hnet pcad2"
+    tags: ${tags}
