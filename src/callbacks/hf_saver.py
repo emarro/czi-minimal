@@ -498,7 +498,11 @@ class HuggingFaceCompatibleCheckpointing(CheckpointSaver):
         # TODO: Check that HF saving works with state.fsdp_sharded_state_dict_enabled
         #  (or if we can ignore this scenario).
         # TODO: Do we need to implement HF uploading for remote uploading too?
-        super()._save_checkpoint(state, logger)  # Perform standard checkpointing
+        # Hacky try/catch to traige errors with removing already deleted ckpts (concurrency bug?)
+        try:
+            super()._save_checkpoint(state, logger)  # Perform standard checkpointing
+        except FileNotFoundError as e:
+            pass
         if self.disable_hf:
             # super()._save_checkpoint(state, logger)  # Perform standard checkpointing
             # Exit and don't upload to hf
@@ -583,9 +587,9 @@ class HuggingFaceCompatibleCheckpointing(CheckpointSaver):
                 )
             log.debug(f"HF checkpoint pushed to {self.hub_repo_id}")
 
-        if not saved_hf_path:  # not all ranks save
-            super()._save_checkpoint(state, logger)  # Perform standard checkpointing
-            return
+            # if not saved_hf_path:  # not all ranks save
+            # super()._save_checkpoint(state, logger)  # Perform standard checkpointing
+            # return
 
         self.rank_saves_symlinks = (
             dist.get_global_rank() == 0 or not state.fsdp_sharded_state_dict_enabled
