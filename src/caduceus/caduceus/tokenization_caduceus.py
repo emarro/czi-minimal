@@ -2,7 +2,19 @@
 
 from typing import List, Optional, Dict, Sequence, Tuple
 
-from transformers import PreTrainedTokenizer
+from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
+
+from itertools import product
+
+from tokenizers import Tokenizer
+from tokenizers.models import WordPiece
+from tokenizers.pre_tokenizers import (
+    ByteLevel,
+    CharDelimiterSplit,
+    Split,
+    PreTokenizer,
+    Whitespace,
+)
 
 
 class CaduceusTokenizer(PreTrainedTokenizer):
@@ -144,3 +156,101 @@ class CaduceusTokenizer(PreTrainedTokenizer):
         self, save_directory: str, filename_prefix: Optional[str] = None
     ) -> Tuple:
         return ()
+
+
+class DNAByteSplit:
+    def pre_tokenize(self, pretok):
+        def split_on_bytes(_, normalized):
+            s = normalized.get()
+            i = 0
+            agg = []
+            while i < len(s):
+                if s[i] != "[":
+                    agg.append((s[i], (i, i + 1)))
+                    i += 1
+                else:
+                    spec_token = ""
+                    start_idx = i
+                    while s[i] != "]" and i < len(s):
+                        spec_token = spec_token + s[i]
+                        i += 1
+                    if i == len(s):
+                        raise Exception(
+                            f"Error processing string {s}, found unmatched '['"
+                        )
+                    else:
+                        spec_token = spec_token + "]"
+                        agg.append((spec_token, (start_idx, i + 1)))
+            return agg
+            return [(c, (i, i + 1)) for i, c in enumerate(s)]
+
+        pretok.split(split_on_bytes)
+
+
+class KMerTokenizer(PreTrainedTokenizerFast):
+    """
+    Caduceus Tokenizer for K-Mers.
+
+    """
+
+    model_input_names = ["input_ids"]
+    _auto_map = {
+        "AutoTokenizer": ["caduceus_tokenization_caduceus.KMerTokenizer", None]
+    }  # second entry should be fasttokenizer version
+
+    def __init__(
+        self,
+        k: int,
+        model_max_length: int,
+        characters: Sequence[str] = ("A", "C", "G", "T", "N"),
+        complement_map=None,
+        bos_token="[BOS]",
+        eos_token="[EOS]",
+        sep_token="[SEP]",
+        cls_token="[CLS]",
+        pad_token="[PAD]",
+        mask_token="[MASK]",
+        unk_token="[UNK]",
+        **kwargs,
+    ):
+        if complement_map is None:
+            complement_map = {"A": "T", "C": "G", "G": "C", "T": "A", "N": "N"}
+        k_mers = characters
+        for k_idx in range(1, k):
+            k_mers = tuple(["".join(x) for x in product(k_mers, characters)])
+        for k_mer in k_mers:
+            if len(k_mer) == k:
+                complement_map[k_mer] = "".join(
+                    [complement_map[char] for char in k_mer]
+                )
+        # print(f"Characters: {characters}")
+        # print(f"KMers: {list(k_mers)}")
+        # print(f"Complement map: {complement_map}")
+        new_characters = k_mers + characters
+        new_vocab_list = [
+            bos_token,
+            eos_token,
+            sep_token,
+            mask_token,
+            cls_token,
+            pad_token,
+            unk_token,
+        ] + list(new_characters)
+        # print(new_vocab_list)
+        new_vocab = {k: idx for idx, k in enumerate(new_vocab_list)}
+        # print(new_vocab)
+        tok = Tokenizer(
+            model=WordPiece(
+                new_vocab,
+                unk_token=unk_token,
+                max_input_chars_per_word=k + 6,
+                continuing_subword_prefix="",
+            )
+        )
+        tok.pre_tokenizer = Whitespace()
+        super().__init__(
+            tokenizer_object=tok,
+            unk_token=unk_token,
+            mask_token=mask_token,
+            pad_token=pad_token,
+        )
