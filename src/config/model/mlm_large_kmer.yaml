@@ -1,6 +1,7 @@
 _target_: wrappers.hnet.build_model
 _convert_: "all"
-_modelstr_: "cad_${model.arch_layout}_N=${model.default_target_ratio}_D=${model.d_model}"
+_modelstr_: "cad_${model.arch_layout}_kmer=${model.k}_D=${model.d_model}"
+
 
 arch_layout: ["C3T1C19"] #architecture for DNA from Table 7 with best PPL in HNet paper
 d_model: [1024] #d_model of each stage (matches stages from arch_layout)
@@ -24,7 +25,7 @@ use_return_dict: False
 
 # Meta variables, not used in HNetConfig directly
 default_target_ratio: null
-max_seq_len: 512
+max_seq_len: 8192
 mlm: True
 log_bpreds: False
 use_kmer: True
