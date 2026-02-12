@@ -1,5 +1,5 @@
 import torch
-from caduceus.caduceus import CaduceusTokenizer
+from caduceus.caduceus import CaduceusTokenizer, KMerTokenizer
 from hnet.hnet.models.mixer_seq import HNetForCausalLM
 from hnet.hnet.models.config_hnet import (
     AttnConfig,
@@ -17,12 +17,21 @@ def build_model(**model_config):
     # attn_cfg = AttnConfig(**model_config.get("attn_cfg"))
     # ssm_cfg = SSMConfig(**model_config.get("ssm_cfg"))
     ignore_keys = ["max_seq_len", "mlm", "default_target_ratio", "_modelstr_"]
+    use_kmer = model_config.get("use_kmer", False)
+    if use_kmer:
+        tokenizer = KMerTokenizer(
+            k=model_config["k"], model_max_length=model_config["max_seq_len"]
+        )
+        if model_config["vocab_size"] < len(tokenizer):
+            model_config["vocab_size"] = len(tokenizer)
+    else:
+        tokenizer = CaduceusTokenizer(model_max_length=model_config["max_seq_len"])
+    print(model_config)
     hnet_cfg = HNetConfig(
-        **{x: v for x, v in model_config.items() if x not in ignore_keys}
+        **{x: v for x, v in model_config.items() if x not in ignore_keys},
     )
     # Create model
     model = HNetForCausalLM(hnet_cfg, dtype=torch.bfloat16)
     # Use existing tokenizer instead of byte tokenizer (dna is already in bytes)
     # tokenizer = ByteTokenizer()
-    tokenizer = CaduceusTokenizer(model_max_length=model_config["max_seq_len"])
     return ComposerWrapper(model, tokenizer, mlm=model_config["mlm"])
