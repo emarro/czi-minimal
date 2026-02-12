@@ -304,14 +304,24 @@ class KMerTokenizer(PreTrainedTokenizerFast):
     def get_vocab(self) -> Dict[str, int]:
         return self._vocab_str_to_int
 
-    def __call__(self, text, **kwargs):
-        # print(f"Input text {text}")
-        split_tokens = self.custom_pretok.split_on_bytes(text)
-        # print(f"Split tokens: {split_tokens}")
-        return_dict = {"input_ids": [], "offset_mapping": []}
-        for x, span in split_tokens:
-            return_dict["input_ids"].append(self._vocab_str_to_int[x])
-            return_dict["offset_mapping"].append(span)
+    def __call__(self, text, return_offsets_mapping=False, **kwargs):
+        if not isinstance(text, (list, tuple)):  # not batched, batch it
+            text = [text]
+        return_dict = {"input_ids": []}
+        input_ids = []
+        offset_mapping = []
+        for seq in text:
+            # print(f"Input text {text}")
+            split_tokens = self.custom_pretok.split_on_bytes(seq)
+            # print(f"Split tokens: {split_tokens}")
+            inner_input_ids = []
+            inner_offset_mapping = []
+            for x, span in split_tokens:
+                inner_input_ids.append(self._vocab_str_to_int[x])
+                inner_offset_mapping.append(span)
+            input_ids.append(inner_input_ids)
+            offset_mapping.append(inner_offset_mapping)
+
         device = (
             kwargs["device"]
             if "device" in kwargs
@@ -320,13 +330,14 @@ class KMerTokenizer(PreTrainedTokenizerFast):
             else torch.device("cpu")
         )
         return_dict["input_ids"] = torch.tensor(
-            return_dict["input_ids"],
+            input_ids,
             dtype=torch.long,
         )
-        return_dict["offset_mapping"] = torch.tensor(
-            return_dict["offset_mapping"],
-            dtype=torch.long,
-        )
+        if return_offsets_mapping:
+            return_dict["offset_mapping"] = torch.tensor(
+                offset_mapping,
+                dtype=torch.long,
+            )
         return return_dict
         full_seq = [(self._vocab_str_to_int[x], span) for x, span in split_tokens]
         # full_seq = super().__call__(split_tokens, **kwargs)
