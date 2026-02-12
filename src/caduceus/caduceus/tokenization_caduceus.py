@@ -320,10 +320,12 @@ class KMerTokenizer(PreTrainedTokenizerFast):
             else torch.device("cpu")
         )
         return_dict["input_ids"] = torch.tensor(
-            return_dict["input_ids"], dtype=torch.long, device=device
+            return_dict["input_ids"],
+            dtype=torch.long,
         )
         return_dict["offset_mapping"] = torch.tensor(
-            return_dict["offset_mapping"], dtype=torch.long, device=device
+            return_dict["offset_mapping"],
+            dtype=torch.long,
         )
         return return_dict
         full_seq = [(self._vocab_str_to_int[x], span) for x, span in split_tokens]
