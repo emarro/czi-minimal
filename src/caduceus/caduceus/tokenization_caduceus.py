@@ -1,5 +1,7 @@
 """Character tokenizer for Hugging Face."""
 
+import torch
+
 from typing import List, Optional, Dict, Sequence, Tuple
 
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
@@ -159,32 +161,40 @@ class CaduceusTokenizer(PreTrainedTokenizer):
 
 
 class DNAByteSplit:
-    def pre_tokenize(self, pretok):
-        def split_on_bytes(_, normalized):
-            s = normalized.get()
-            i = 0
-            agg = []
-            while i < len(s):
-                if s[i] != "[":
+    def __init__(self, k):
+        self.k = k
+
+    def split_on_bytes(self, normalized):
+        s = normalized  # .get()
+        i = 0
+        agg = []
+        # Split into DNA and special Tokens (wrapped in [])
+        while i < len(s):
+            if s[i] != "[":
+                if i + self.k > len(s):
+                    agg.append((s[i], (i, i + 1)))
+                    i += 1
+                elif "[" in s[i : i + self.k] or "]" in s[i : i + self.k]:
                     agg.append((s[i], (i, i + 1)))
                     i += 1
                 else:
-                    spec_token = ""
-                    start_idx = i
-                    while s[i] != "]" and i < len(s):
-                        spec_token = spec_token + s[i]
-                        i += 1
-                    if i == len(s):
-                        raise Exception(
-                            f"Error processing string {s}, found unmatched '['"
-                        )
-                    else:
-                        spec_token = spec_token + "]"
-                        agg.append((spec_token, (start_idx, i + 1)))
-            return agg
-            return [(c, (i, i + 1)) for i, c in enumerate(s)]
-
-        pretok.split(split_on_bytes)
+                    agg.append((s[i : i + self.k], (i, i + self.k)))
+                    i += self.k
+            else:
+                spec_token = ""
+                start_idx = i
+                while s[i] != "]" and i < len(s):
+                    spec_token = spec_token + s[i]
+                    i += 1
+                if i == len(s):
+                    raise Exception(f"Error processing string {s}, found unmatched '['")
+                else:
+                    spec_token = spec_token + "]"
+                    agg.append((spec_token, (start_idx, i + 1)))
+                    i += 1
+        # aggregate DNA into k-mers if possible, otherwise leave single BP
+        return agg
+        return [(c, (i, i + 1)) for i, c in enumerate(s)]
 
 
 class KMerTokenizer(PreTrainedTokenizerFast):
@@ -223,6 +233,7 @@ class KMerTokenizer(PreTrainedTokenizerFast):
                 complement_map[k_mer] = "".join(
                     [complement_map[char] for char in k_mer]
                 )
+        self.custom_pretok = DNAByteSplit(k=k)
         # print(f"Characters: {characters}")
         # print(f"KMers: {list(k_mers)}")
         # print(f"Complement map: {complement_map}")
@@ -292,3 +303,31 @@ class KMerTokenizer(PreTrainedTokenizerFast):
 
     def get_vocab(self) -> Dict[str, int]:
         return self._vocab_str_to_int
+
+    def __call__(self, text, **kwargs):
+        # print(f"Input text {text}")
+        split_tokens = self.custom_pretok.split_on_bytes(text)
+        # print(f"Split tokens: {split_tokens}")
+        return_dict = {"input_ids": [], "offset_mapping": []}
+        for x, span in split_tokens:
+            return_dict["input_ids"].append(self._vocab_str_to_int[x])
+            return_dict["offset_mapping"].append(span)
+        device = (
+            kwargs["device"]
+            if "device" in kwargs
+            else torch.device("cuda")
+            if torch.cuda.is_available()
+            else torch.device("cpu")
+        )
+        return_dict["input_ids"] = torch.tensor(
+            return_dict["input_ids"], dtype=torch.long, device=device
+        )
+        return_dict["offset_mapping"] = torch.tensor(
+            return_dict["offset_mapping"], dtype=torch.long, device=device
+        )
+        return return_dict
+        full_seq = [(self._vocab_str_to_int[x], span) for x, span in split_tokens]
+        # full_seq = super().__call__(split_tokens, **kwargs)
+        print(f"Full Tokenized: {full_seq}")
+        assert False
+        return full_seq
