@@ -170,7 +170,7 @@ def build_dataloader(
                 )
             else:
                 encoding = self.tokenizer(
-                    sequence.upper(),
+                    sequence,
                     padding="max_length",
                     truncation=True,
                     max_length=self.max_length,
@@ -255,6 +255,11 @@ def build_dataloader(
             ):  # map original spans to new tokens to recompute loss weights for repeat regions
                 new_loss_weights = torch.zeros(
                     encoding["input_ids"].shape[0], device=encoding["input_ids"].device
+                )
+                assert (
+                    encoding["input_ids"].shape[0] <= (len(sequence) // self.k) + self.k
+                ) and (encoding["input_ids"].shape[0] > 3), (
+                    f"Sequence of length {len(sequence)} with k={self.k} returned invalid length of {encoding['input_ids'].shape[0]}, should be at most {(len(sequence) // self.k) + self.k}"
                 )
                 for idx, (start, stop) in enumerate(encoding["offset_mapping"]):
                     new_loss_weights[idx] = loss_weights[start:stop].mean()
