@@ -50,6 +50,7 @@ def build_dataloader(
     split: str = "train",
     eval_only: bool = False,
     mask_seq: bool = False,
+    k: int = None,  # only for kmer tok
 ):
     """Build data loader for masked language modeling."""
 
@@ -89,6 +90,7 @@ def build_dataloader(
             mask_seq=False,
             default_target_ratio=None,
             mlm=True,
+            k=None,
         ):
             """
             Datasets that wraps tokenization
@@ -98,6 +100,7 @@ def build_dataloader(
             repeat_weight: float the value for which to downweight repetitive (soft-masked) portions of a seq
             mask_seq: bool Whether to mask sequences at middle token (if ref and alt are in dataset)
             default_target_ratio: The default target ratio used by HNet (N in their paper) (if any)
+            k: k-mer used in k-mer tokenizer, None if not a k-mer tokenizer
             """
             self.dataset = dataset
             self.tokenizer = tokenizer
@@ -107,6 +110,7 @@ def build_dataloader(
             self.mask_seq = mask_seq
             self.default_target_ratio = default_target_ratio
             self.mlm = mlm
+            self.k = k
 
             logger.info("\n=== Dataset Information ===")
             logger.info(f"Dataset size: {len(dataset)}")
@@ -144,6 +148,7 @@ def build_dataloader(
                 # sequence[var_idx] = int(
                 #    self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
                 # )
+                # TODO: Adapt for k-mer tokenizer, {A,T,C,G} rarely or never seen for k-mer tokenizers, need to mask out the SPAN probs
                 if self.mlm:
                     sequence = (
                         sequence[:var_idx]
@@ -152,15 +157,28 @@ def build_dataloader(
                     )
                 ref_id = tokenizer(item["ref"], return_tensors="pt")["input_ids"][:, 0]
                 alt_id = tokenizer(item["alt"], return_tensors="pt")["input_ids"][:, 0]
-
-            encoding = self.tokenizer(
-                sequence,
-                padding="max_length",
-                truncation=True,
-                max_length=self.max_length,
-                return_tensors="pt",
-                add_special_tokens=False,
-            )
+            # print(sequence)
+            if self.k is not None:
+                encoding = self.tokenizer(
+                    sequence.upper(),
+                    # padding="max_length",
+                    # truncation=True,
+                    # max_length=self.max_length,
+                    return_offsets_mapping=True,
+                    return_tensors="pt",
+                    add_special_tokens=False,
+                )
+            else:
+                encoding = self.tokenizer(
+                    sequence.upper(),
+                    padding="max_length",
+                    truncation=True,
+                    max_length=self.max_length,
+                    return_tensors="pt",
+                    add_special_tokens=False,
+                )
+            # print(encoding)
+            # assert False
             if ref_id is not None:
                 encoding["ref_id"] = ref_id
                 encoding["alt_id"] = alt_id
@@ -232,6 +250,16 @@ def build_dataloader(
             repeat_loss = self.repeat_weight
             # Repeat regions are reweighted to repeat_loss. 1 otherwise.
             loss_weights = (is_lowercase * (repeat_loss - 1)) + 1
+            if (
+                self.k is not None
+            ):  # map original spans to new tokens to recompute loss weights for repeat regions
+                new_loss_weights = torch.zeros(
+                    encoding["input_ids"].shape[0], device=encoding["input_ids"].device
+                )
+                for idx, (start, stop) in enumerate(encoding["offset_mapping"]):
+                    new_loss_weights[idx] = loss_weights[start:stop].mean()
+                loss_weights = new_loss_weights
+                # print(f"{loss_weights} ({loss_weights.shape})")
             encoding["loss_weights"] = loss_weights if self.mlm else loss_weights[1:]
             if self.default_target_ratio is not None:
                 encoding["target_ratio"] = torch.tensor(self.default_target_ratio)
@@ -246,6 +274,7 @@ def build_dataloader(
         mask_seq=mask_seq,
         default_target_ratio=default_target_ratio,
         mlm=mlm,
+        k=k,
     )
     sampler = dist.get_sampler(tokenized_dataset, shuffle=(split == "train"))
     collate_fn = (
@@ -389,6 +418,7 @@ def run_training(cfg: DictConfig) -> None:
         max_seq_len=cfg.model.max_seq_len,
         mlm=cfg.model.mlm,
         default_target_ratio=cfg.model.get("default_target_ratio", None),
+        k=cfg.model.get("k", None),
     )
     val_loader = None
     val_loader = build_dataloader(
@@ -399,6 +429,7 @@ def run_training(cfg: DictConfig) -> None:
         max_seq_len=cfg.model.max_seq_len,
         mlm=cfg.model.mlm,
         default_target_ratio=cfg.model.get("default_target_ratio", None),
+        k=cfg.model.get("k", None),
     )
 
     val_loader = Evaluator(
@@ -420,6 +451,7 @@ def run_training(cfg: DictConfig) -> None:
             max_seq_len=cfg.model.max_seq_len,
             mlm=cfg.model.mlm,
             default_target_ratio=None,
+            k=cfg.model.get("k", None),
         )
 
         zeroshot_val_loader = Evaluator(
@@ -437,7 +469,7 @@ def run_training(cfg: DictConfig) -> None:
                         log_only_N=cfg.eval_dataset.get("log_only_N", 200),
                     )
                 )
-            #callbacks.append(
+            # callbacks.append(
             #    ChrChunker(
             #        target_eval_label=cfg.eval_dataset.get("label"),
             #        save_dir=cfg.eval_dataset.save_dir,
@@ -445,7 +477,7 @@ def run_training(cfg: DictConfig) -> None:
             #        if "callbacks" in cfg and not cfg.callbacks.get("disable_hf", False)
             #        else None,
             #    )
-            #)
+            # )
 
         eval_dataloaders = [val_loader, zeroshot_val_loader]
 
@@ -463,6 +495,7 @@ def run_training(cfg: DictConfig) -> None:
             max_seq_len=cfg.model.max_seq_len,
             mlm=cfg.model.mlm,
             default_target_ratio=None,
+            k=cfg.model.get("k", None),
         )
 
         maize_val_loader = Evaluator(

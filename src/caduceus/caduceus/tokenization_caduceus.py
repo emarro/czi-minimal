@@ -243,14 +243,52 @@ class KMerTokenizer(PreTrainedTokenizerFast):
             model=WordPiece(
                 new_vocab,
                 unk_token=unk_token,
-                max_input_chars_per_word=k + 6,
+                max_input_chars_per_word=100_000,  # k + 6,
                 continuing_subword_prefix="",
             )
         )
         tok.pre_tokenizer = Whitespace()
+        self.characters = new_vocab_list
+        self._vocab_str_to_int = new_vocab
+        self._vocab_int_to_str = {v: k for k, v in self._vocab_str_to_int.items()}
+        add_prefix_space = kwargs.pop("add_prefix_space", False)
+        padding_side = kwargs.pop("padding_side", "left")
+        self._complement_map = {}
+        for k, v in self._vocab_str_to_int.items():
+            complement_id = (
+                self._vocab_str_to_int[complement_map[k]]
+                if k in complement_map.keys()
+                else v
+            )
+            self._complement_map[self._vocab_str_to_int[k]] = complement_id
+
         super().__init__(
             tokenizer_object=tok,
             unk_token=unk_token,
             mask_token=mask_token,
             pad_token=pad_token,
         )
+
+    def vocab_size(self) -> int:
+        return len(self._vocab_str_to_int)
+
+    @property
+    def complement_map(self) -> Dict[int, int]:
+        return self._complement_map
+
+    def _tokenize(self, text: str, **kwargs) -> List[str]:
+        return list(text.upper())  # Convert all base pairs to uppercase
+
+    def _convert_token_to_id(self, token: str) -> int:
+        return self._vocab_str_to_int.get(token, self._vocab_str_to_int["[UNK]"])
+
+    def _convert_id_to_token(self, index: int) -> str:
+        return self._vocab_int_to_str[index]
+
+    def convert_tokens_to_string(self, tokens):
+        return "".join(
+            tokens
+        )  # Note: this operation has lost info about which base pairs were originally lowercase
+
+    def get_vocab(self) -> Dict[str, int]:
+        return self._vocab_str_to_int
