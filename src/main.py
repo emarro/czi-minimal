@@ -308,7 +308,6 @@ def build_dataloader(
         mlm=mlm,
         k=k,
     )
-    [x for x in tqdm(tokenized_dataset)]
     sampler = dist.get_sampler(tokenized_dataset, shuffle=(split == "train"))
     collate_fn = (
         DataCollatorForLanguageModeling(
