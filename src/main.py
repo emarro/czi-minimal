@@ -203,11 +203,20 @@ def build_dataloader(
                     # tokenizer.aux_mappings[k] = Vocab()
                     # print(tokenizer.aux_mappings)
                 # encoding[k] = torch.tensor(tokenizer.aux_mappings[k][v])
-
-            is_lowercase = torch.tensor(
-                [x.islower() for x in item[self.seq_idx]],
-                device=encoding["input_ids"].device,
-            )
+            if self.k is None:
+                is_lowercase = torch.tensor(
+                    [x.islower() for x in item[self.seq_idx]],
+                    device=encoding["input_ids"].device,
+                )
+            else:  # handle [MASK] in seq
+                if self.mask_seq:
+                    sequence.replace("[MASK]", "NNNNNN")
+                is_lowercase = torch.tensor(
+                    [
+                        x.islower() for x in sequence
+                    ],  # spans count chars in spec tokens, pad out for loss val calcs
+                    device=encoding["input_ids"].device,
+                )
             # print(item[self.seq_idx])
             # print(is_lowercase)
             # print(is_lowercase.shape)
