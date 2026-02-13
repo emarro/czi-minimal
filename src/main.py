@@ -72,6 +72,21 @@ def build_dataloader(
     )
 
     cutoff = cfg.get("cutoff", None)
+
+    # Filter out extra IUPAC codes (usually O(10s) of bps out of billions)
+    translate = {
+        ord("M"): "N",
+        ord("R"): "N",
+        ord("W"): "N",
+        ord("S"): "N",
+        ord("Y"): "N",
+        ord("K"): "N",
+        ord("V"): "N",
+        ord("H"): "N",
+        ord("D"): "N",
+        ord("B"): "N",
+    }
+    dataset = dataset.map(lambda batch: {"seq": batch["seq"].translate(translate)})
     # Filter sequences that remain with lots of "N"s
     if cutoff is not None:
         logger.info(f"Dataset length: {len(dataset)}")
