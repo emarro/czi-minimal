@@ -5,6 +5,8 @@ import os
 from typing import cast, Optional, Any
 
 import hydra_setup  # register resolvers for hydra
+from tqdm import tqdm
+import time
 
 import hydra
 import torch
@@ -159,6 +161,7 @@ def build_dataloader(
                 alt_id = tokenizer(item["alt"], return_tensors="pt")["input_ids"][:, 0]
             # print(sequence)
             if self.k is not None:
+                # start = time.time()
                 encoding = self.tokenizer(
                     sequence.upper(),
                     # padding="max_length",
@@ -168,6 +171,8 @@ def build_dataloader(
                     return_tensors="pt",
                     add_special_tokens=False,
                 )
+                # end = time.time()
+                # print(f"Encoding time: {end - start}")
             else:
                 encoding = self.tokenizer(
                     sequence,
@@ -217,6 +222,7 @@ def build_dataloader(
                 # Get DNA token IDs directly from tokenizer's character set;
                 # see https://github.com/kuleshov-group/llmlib/issues/8 for more on
                 # why this is necessary and how it might be improved.
+                # start = time.time()
                 dna_token_ids = {
                     int(self.tokenizer.get_vocab()[c])
                     for c in self.tokenizer.characters
@@ -227,6 +233,8 @@ def build_dataloader(
                 labels[
                     ~valid_dna_tokens
                 ] = -100  # Mask out everything that's not a DNA token
+                # end = time.time()
+                # print(f"Check valid {end - start}")
             else:
                 # We're in AR and need to shift inputs and labels ourselves
                 encoding["input_ids"] = encoding["input_ids"][:-1]
@@ -261,9 +269,28 @@ def build_dataloader(
                 ) and (encoding["input_ids"].shape[0] > 3), (
                     f"Sequence of length {len(sequence)} with k={self.k} returned invalid length of {encoding['input_ids'].shape[0]}, should be at most {(len(sequence) // self.k) + self.k}"
                 )
-                for idx, (start, stop) in enumerate(encoding["offset_mapping"]):
-                    new_loss_weights[idx] = loss_weights[start:stop].mean()
-                loss_weights = new_loss_weights
+                # start_time = time.time()
+                # for idx, (start, stop) in enumerate(encoding["offset_mapping"]):
+                #    new_loss_weights[idx] = loss_weights[start:stop].mean()
+                # end_time = time.time()
+                # print(f"Loss weight time: {end_time - start_time}")
+                # start_time = time.time()
+
+                def span_means(x, offsets):
+                    x = x.float()
+                    csum = torch.nn.functional.pad(torch.cumsum(x, 0), (1, 0))
+                    span_sums = csum[offsets[:, 1]] - csum[offsets[:, 0]]
+                    return span_sums / (offsets[:, 1] - offsets[:, 0])
+
+                vec_loss_weights = span_means(loss_weights, encoding["offset_mapping"])
+                # end_time = time.time()
+                # print(f"Vec loss weight time: {end_time - start_time}")
+                # print(
+                #    f"Diff in loss weights = {((new_loss_weights - vec_loss_weights) ** 2).sum()}"
+                # )
+                # print(new_loss_weights)
+                # print(vec_loss_weights)
+                loss_weights = vec_loss_weights
                 # print(f"{loss_weights} ({loss_weights.shape})")
             encoding["loss_weights"] = loss_weights if self.mlm else loss_weights[1:]
             if self.default_target_ratio is not None:
@@ -281,6 +308,7 @@ def build_dataloader(
         mlm=mlm,
         k=k,
     )
+    [x for x in tqdm(tokenized_dataset)]
     sampler = dist.get_sampler(tokenized_dataset, shuffle=(split == "train"))
     collate_fn = (
         DataCollatorForLanguageModeling(
