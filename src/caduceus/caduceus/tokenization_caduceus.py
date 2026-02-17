@@ -165,7 +165,7 @@ class DNAByteSplit:
         self.k = k
 
     def split_on_bytes(self, normalized):
-        s = normalized  # .get()
+        s = normalized.upper()  # .get()
         i = 0
         agg = []
         # Split into DNA and special Tokens (wrapped in [])
@@ -280,6 +280,7 @@ class KMerTokenizer(PreTrainedTokenizerFast):
             pad_token=pad_token,
         )
 
+    @property
     def vocab_size(self) -> int:
         return len(self._vocab_str_to_int)
 
