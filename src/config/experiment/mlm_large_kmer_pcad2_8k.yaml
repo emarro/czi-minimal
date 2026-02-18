@@ -14,7 +14,7 @@ hydra:
   sweeper:
     # hyperparams to search over
     params:
-      model.k: 6, 2, 3
+      model.k: 3
 
 
 
