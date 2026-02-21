@@ -14,7 +14,7 @@ hydra:
   sweeper:
     # hyperparams to search over
     params:
-      model.default_target_ratio: 6, 5
+      model.default_target_ratio: 6, 12 
 
 model:
   max_seq_len: 8192

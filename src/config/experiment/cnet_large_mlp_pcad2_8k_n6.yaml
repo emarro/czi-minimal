@@ -1,20 +1,20 @@
 # @package _global_
 # let the experiment node modify configs globally
 defaults:
-  - override /model: cnet_large
+  - override /model: cnet_large_mlp_selection
   - override /loggers: wandb
   - override /dataset: pcad2
   - override /trainer: fixed_batch
 
 
-tags: ["cnet", "pcad2", "8k", "plant", "ar"]
+tags: ["cnet", "pcad2", "8k", "plant", "mlp"]
 
 hydra:
   mode: "MULTIRUN"
   sweeper:
     # hyperparams to search over
     params:
-      model.default_target_ratio: 3, 2
+      model.default_target_ratio:  6, 12
 
 model:
   max_seq_len: 8192
