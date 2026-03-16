@@ -42,6 +42,7 @@ from caduceus.caduceus.tokenization_caduceus import CaduceusTokenizer
 @dataclass
 class CausalLMOutput:
     logits: torch.Tensor
+    last_hidden_state: torch.Tensor
     bpred_output: list[RoutingModuleOutput]
     inference_params: HNetState
     loss: torch.FloatTensor
@@ -293,6 +294,7 @@ class HNetForCausalLM(PreTrainedModel):
                 "loss",
                 "unreduced_loss",
                 "logits",
+                "last_hidden_state",
                 "bpred_output",
                 "inference_params",
                 "ar_loss",
@@ -304,6 +306,7 @@ class HNetForCausalLM(PreTrainedModel):
             loss=loss,
             unreduced_loss=unreduced_ar_loss,
             logits=lm_logits,
+            last_hidden_state=hidden_states,
             bpred_output=bpred_output,
             inference_params=inference_params,
             ar_loss=ar_loss,
