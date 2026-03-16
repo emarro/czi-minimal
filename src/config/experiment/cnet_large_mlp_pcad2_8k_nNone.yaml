@@ -14,7 +14,7 @@ hydra:
   sweeper:
     # hyperparams to search over
     params:
-      model.ratio_loss_weight: [0.00, 0.01, 0.02, 0.05] #alpha from the paper
+      model.ratio_loss_weight: 0.00, 0.01, 0.02, 0.05 #alpha from the paper
 
 
 model:
