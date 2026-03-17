@@ -21,7 +21,7 @@ model:
   max_seq_len: 8192
 
 
-task_name: "pcad2_cnet"
+task_name: "pcad2_cnet_os"
 
 optimizer:
   lr: 5e-4
