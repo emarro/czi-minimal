@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 
 import torch
+import triton
+import triton.language as tl
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -9,6 +11,149 @@ from einops import repeat, rearrange
 from mamba_ssm.ops.triton.ssd_combined import mamba_chunk_scan_combined
 
 from hnet.hnet.modules.utils import get_seq_idx
+
+
+@triton.jit
+def _batched_dp_kernel(
+    adj_ptr,
+    F_ptr,
+    bp_ptr,
+    N: tl.constexpr,
+    stride_adj_b,
+    stride_adj_i,
+    stride_adj_j,
+    stride_f_b,
+    stride_f_n,
+    stride_bp_b,
+    stride_bp_n,
+    BLOCK_SIZE: tl.constexpr,
+):
+    # TODO: Make adj triu
+    # TODO: make adj sparse (govered by \alpha in main loop) (needs some reworking of core algo)
+    # TODO: experiment with additionally blocking adj with some horizon k
+    batch_idx = tl.program_id(0)
+
+    batch_adj_ptr = adj_ptr + batch_idx * stride_adj_b
+    batch_f_ptr = F_ptr + batch_idx * stride_f_b
+    batch_bp_ptr = bp_ptr + batch_idx * stride_bp_b
+
+    offsets = tl.arange(0, BLOCK_SIZE)
+
+    # Hoist: load f_vals once
+    f_vals = tl.load(batch_f_ptr + offsets, mask=offsets < N, other=float("inf")).to(
+        tl.float32
+    )
+
+    # Hoist: start adj pointer at j=1 column
+    adj_j_ptr = batch_adj_ptr + stride_adj_j
+
+    for j in tl.range(1, N + 1):
+        mask = offsets < j
+
+        costs = tl.load(
+            adj_j_ptr + offsets * stride_adj_i, mask=mask, other=float("inf")
+        ).to(tl.float32)
+        candidates = f_vals + costs
+
+        best_val = tl.min(candidates, axis=0)
+        best_i = tl.argmin(candidates, axis=0)
+
+        # Update f_vals in-register rather than store/reload
+        f_vals = tl.where(offsets == j, best_val, f_vals)
+
+        tl.store(batch_bp_ptr + j, best_i.to(tl.int64))
+
+        adj_j_ptr += stride_adj_j  # pointer advance instead of multiply
+
+    # Single bulk store at end
+    tl.store(batch_f_ptr + offsets, f_vals, mask=offsets < N + 1)
+
+
+def optimal_selection_triton(S, alpha, beta_base):
+    if S.dim() == 2:
+        S = S.unsqueeze(0)
+
+    B, N, _ = S.shape
+    device = S.device
+    dtype = torch.float32  # Changed to float32 for consistency
+
+    S = S.to(
+        torch.bfloat16
+    )  # Explicitly cast S to bfloat16 to match other implementations
+
+    # 1. Pre-calculation (Vectorized)
+    # V is calculated in original S dtype, then cast for P
+    V = torch.relu(alpha - S)
+
+    # Integral Image in fp32 for precision
+    P = torch.zeros(
+        (B, N + 1, N + 1), device=device, dtype=torch.float32
+    )  # Changed to float32
+    P[:, 1:, 1:] = torch.cumsum(
+        torch.cumsum(V.float(), dim=1), dim=2
+    )  # V.float() to ensure correct type if S is bfloat16
+
+    P_diag = torch.diagonal(P, dim1=1, dim2=2)
+    cost_matrix = 0.5 * (P_diag.unsqueeze(1) - 2 * P + P_diag.unsqueeze(2)).to(
+        dtype
+    )  # Ensure cost_matrix is float32
+
+    indices = torch.arange(N + 1, device=device).to(dtype)
+    lengths = indices.view(1, -1) - indices.view(-1, 1)
+    # Clamp lengths to avoid log(0)
+    adaptive_beta = (beta_base * torch.log(torch.relu(lengths) + 1.0)).to(
+        dtype
+    )  # Ensure adaptive_beta is float32
+
+    adj_matrix = (cost_matrix + adaptive_beta.unsqueeze(0)).to(dtype).contiguous()
+
+    # 2. DP Buffers
+    F = torch.full(
+        (B, N + 1), float("inf"), device=device, dtype=dtype
+    )  # Changed to float32
+    F[:, 0] = 0.0
+    backpointers = torch.zeros((B, N + 1), dtype=torch.long, device=device)
+
+    # 3. Execution
+    BLOCK_SIZE = triton.next_power_of_2(N + 1)
+
+    _batched_dp_kernel[(B,)](
+        adj_matrix,
+        F,
+        backpointers,
+        N,
+        adj_matrix.stride(0),
+        adj_matrix.stride(1),
+        adj_matrix.stride(2),
+        F.stride(0),
+        F.stride(1),
+        backpointers.stride(0),
+        backpointers.stride(1),
+        BLOCK_SIZE=BLOCK_SIZE,
+    )
+    return backpointers
+
+
+def backpointers_to_bounds(backpointers):
+    # 4. CPU-based reconstruction
+    print(f"Backpointers: {backpointers} ({backpointers.shape})")
+    if len(backpointers.shape) == 1:
+        backpointers = backpointers.unsqueeze(0)
+    B, N = backpointers.shape
+    all_communities = []
+    bp_cpu = backpointers.cpu().numpy()
+    # print(f"Backpointers: {bp_cpu}") # Added print for debugging
+    for b in range(B):
+        communities = []
+        curr = N - 1
+        while curr > 0:
+            prev = bp_cpu[b, curr]
+            communities.append((int(prev), curr - 1))
+            curr = prev
+        all_communities.append(communities[::-1])
+    all_communities = np.array(all_communities)
+
+    return all_communities if B > 1 else all_communities[0]
 
 
 @dataclass
@@ -45,7 +190,9 @@ class DeChunkState:
 
 
 class RoutingModule(nn.Module):
-    def __init__(self, d_model, selection="cos", device=None, dtype=None):
+    def __init__(
+        self, d_model, selection="cos", alpha=None, beta=None, device=None, dtype=None
+    ):
         self.d_model = d_model
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -76,6 +223,12 @@ class RoutingModule(nn.Module):
                 self.k_proj_layer.weight.copy_(torch.eye(d_model))
             self.q_proj_layer.weight._no_reinit = True
             self.k_proj_layer.weight._no_reinit = True
+        elif selection == "os":
+            assert alpha is not None and beta is not None, (
+                f"Got {alpha} for alpha and {beta} for beta, invalid"
+            )
+            self.alpha = alpha
+            self.beta = beta
         else:
             raise Exception(f"Unrecognized selection mechanism {selection}")
 
@@ -103,6 +256,11 @@ class RoutingModule(nn.Module):
         if cu_seqlens is not None:
             # We are in packed mode, so hidden_states is (T, D). Make it (B, T, D)
             hidden_states = hidden_states.unsqueeze(0)
+        # Force boundary probability of the first element to 1.0
+        PAD_PROB = 1.0
+        B, L, D = hidden_states.shape
+        boundary_prob = torch.zeros((B, L), device=hidden_states.device)
+
         if self.selection == "cos":
             cos_sim = torch.einsum(
                 "b l d, b l d -> b l",
@@ -110,13 +268,18 @@ class RoutingModule(nn.Module):
                 F.normalize(self.k_proj_layer(hidden_states[:, 1:]), dim=-1),
             )
             boundary_prob = torch.clamp(((1 - cos_sim) / 2), min=0.0, max=1.0)
+            boundary_prob = F.pad(boundary_prob, (1, 0), "constant", PAD_PROB)
         elif self.selection == "mlp":
             boundary_prob = self.mlp(hidden_states)[:, 1:, 0]  # [B,L, 1]
-        # this clamp should no-op as long as no precision issues are encountered
-
-        # Force boundary probability of the first element to 1.0
-        PAD_PROB = 1.0
-        boundary_prob = F.pad(boundary_prob, (1, 0), "constant", PAD_PROB)
+            boundary_prob = F.pad(boundary_prob, (1, 0), "constant", PAD_PROB)
+        elif self.selection == "os":
+            cos_sim = torch.einsum(
+                "b i d, b j d -> b i j",
+                F.normalize(hidden_states, dim=-1),
+                F.normalize(hidden_states, dim=-1),
+            )
+            backpointers = optimal_selection_triton(cos_sim, self.alpha, self.beta)
+            boundary_prob.scatter_(1, backpointers, 1.0)
 
         if cu_seqlens is not None:
             boundary_prob = boundary_prob.squeeze(0)

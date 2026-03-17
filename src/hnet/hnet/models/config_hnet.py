@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Union
+from typing import List, Union, Optional
 from transformers import PretrainedConfig
 
 
@@ -79,6 +79,12 @@ class HNetConfig(PretrainedConfig):
         use_return_dict: bool = False,
         log_bpreds: bool = True,
         selection: str = "cos",
+        alpha: Optional[
+            float
+        ] = None,  # hyperparam for optimal selection algo (if used), target sim in cluster
+        beta: Optional[
+            float
+        ] = None,  # hyperparam for optimal selection algo (if used), cost of new cluster
         # auto_map={
         #    "AutoConfig": "hnet.hnet.models.confg_hnet.HNetConfig",
         #    "AutoModel": "hnet.hnet.models.mixer_seq.HNetForCausalLM",
@@ -105,6 +111,8 @@ class HNetConfig(PretrainedConfig):
         self.ratio_loss_weight = ratio_loss_weight
         self.log_bpreds = log_bpreds
         self.selection = selection
+        self.alpha = alpha
+        self.beta = beta
         # self.auto_map = auto_map
 
     def __repr__(self):
