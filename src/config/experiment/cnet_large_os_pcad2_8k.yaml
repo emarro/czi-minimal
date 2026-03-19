@@ -29,7 +29,7 @@ optimizer:
 trainer:
   max_duration: "50ep"
   global_train_batch_size: 512 # set small for debugging
-  device_train_microbatch_size: 8 # max size for the small model on 48Gb card (6000ada), 16 for h100 
+  device_train_microbatch_size: 4 # max size for the small model on 48Gb card (6000ada), 16 for h100 
 
 loggers:
   wandb:
