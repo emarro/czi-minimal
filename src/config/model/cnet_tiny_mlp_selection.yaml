@@ -1,6 +1,6 @@
 _target_: wrappers.hnet.build_model
 _convert_: "all"
-_modelstr_: "cnet_${model.arch_layout}_N=${model.default_target_ratio}_D=${model.d_model}_mlp_selection_fixed"
+_modelstr_: "cnet_exp_${model.arch_layout}_N=${model.default_target_ratio}_D=${model.d_model}_mlp_selection_fixed"
 
 arch_layout: ["c1t1",["C5"],"c2"] #architecture for DNA from Table 7 with best PPL in HNet paper
 d_model: [512, 512] #d_model of each stage (matches stages from arch_layout)

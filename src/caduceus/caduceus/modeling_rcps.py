@@ -1,6 +1,5 @@
-"""Reverse-complement equivariant modules.
+"""Reverse-complement equivariant modules."""
 
-"""
 from collections import OrderedDict
 from typing import Optional
 
@@ -10,17 +9,28 @@ from torch import nn
 from torch.nn import functional as F
 
 try:
-    from mamba_ssm.ops.triton.layernorm import RMSNorm, layer_norm_fn, rms_norm_fn  # Legacy mambav1 file structure
+    from mamba_ssm.ops.triton.layernorm import (
+        RMSNorm,
+        layer_norm_fn,
+        rms_norm_fn,
+    )  # Legacy mambav1 file structure
 except ImportError:
     try:
-        from mamba_ssm.ops.triton.layer_norm import RMSNorm, layer_norm_fn, rms_norm_fn  # mambav2 file structure
+        from mamba_ssm.ops.triton.layer_norm import (
+            RMSNorm,
+            layer_norm_fn,
+            rms_norm_fn,
+        )  # mambav2 file structure
     except ImportError:
         RMSNorm, layer_norm_fn, rms_norm_fn = None, None, None
 
 
 class RCPSEmbedding(nn.Module):
     """Embedding layer that supports reverse-complement equivariance."""
-    def __init__(self, vocab_size: int, d_model: int, complement_map: dict, **factory_kwargs):
+
+    def __init__(
+        self, vocab_size: int, d_model: int, complement_map: dict, **factory_kwargs
+    ):
         """
         Args:
             vocab_size: Size of vocabulary.
@@ -30,7 +40,7 @@ class RCPSEmbedding(nn.Module):
         super().__init__()
         self.register_buffer(
             "complement_map",
-            torch.tensor(list(OrderedDict(complement_map).values()), dtype=torch.long)
+            torch.tensor(list(OrderedDict(complement_map).values()), dtype=torch.long),
         )
         self.embedding = nn.Embedding(vocab_size, d_model, **factory_kwargs)
 
@@ -48,7 +58,7 @@ class RCPSEmbedding(nn.Module):
         return torch.gather(
             self.complement_map.unsqueeze(0).expand(x.shape[0], -1),
             dim=1,
-            index=torch.flip(x, dims=[-1])
+            index=torch.flip(x, dims=[-1]),
         )
 
     def forward(self, input_ids):
@@ -62,9 +72,9 @@ class RCPSEmbedding(nn.Module):
             Embedding tensor of shape (batch_size, seq_len, d_model * 2)
         """
         fwd_out = self.embedding(input_ids)
-        rc_out = torch.flip(self.embedding(self.rc(input_ids)), dims=[-2, -1])
+        rc_out = self.embedding(self.rc(input_ids))
 
-        return torch.cat([fwd_out, rc_out], dim=-1)
+        return (fwd_out + torch.flip(rc_out, dims=[-2, -1])) / 2
 
 
 class RCPSWrapper(nn.Module):
@@ -73,6 +83,7 @@ class RCPSWrapper(nn.Module):
     See ref. "Towards a Better Understanding of Reverse-Complement Equivariance for Deep Learning Models in Regulatory
     Genomics", Zhou et al. (2022), https://proceedings.mlr.press/v165/zhou22a.html for more details.
     """
+
     def __init__(self, submodule: nn.Module):
         super().__init__()
         self.submodule = submodule
@@ -92,15 +103,16 @@ class RCPSWrapper(nn.Module):
         """
         n_channels = x.shape[-1]
         # Run submodule along sequence
-        fwd_out = self.submodule(x[..., :n_channels // 2], **kwargs)
+        fwd_out = self.submodule(x, **kwargs)
         # Run submodule along rc-sequence
-        rc_out = self.submodule(self.rc(x[..., n_channels // 2:]), **kwargs)
+        rc_out = self.submodule(self.rc(x), **kwargs)
         # Concatenate along channel dimension (dim=-1)
-        return torch.cat([fwd_out, self.rc(rc_out)], dim=-1)
+        return (fwd_out + self.rc(rc_out)) / 2
 
 
 class RCPSAddNormWrapper(RCPSWrapper):
     """RC equivariant AddNorm layer."""
+
     def __init__(self, submodule: nn.Module):
         super().__init__(submodule)
 
@@ -114,32 +126,32 @@ class RCPSAddNormWrapper(RCPSWrapper):
         n_channels = x.shape[-1]
         if residual is None:
             residual = x
-            x_fwd = self.submodule(x[..., :n_channels // 2].to(dtype=self.submodule.weight.dtype))
-            x_rc = self.submodule(self.rc(x[..., n_channels // 2:]).to(dtype=self.submodule.weight.dtype))
-            x = torch.cat([x_fwd, self.rc(x_rc)], dim=-1)
+            x_fwd = self.submodule(x.to(dtype=self.submodule.weight.dtype))
+            x_rc = self.submodule(self.rc(x).to(dtype=self.submodule.weight.dtype))
+            x = (x_fwd + self.rc(x_rc)) / 2
         else:
-            residual_fwd = x[..., :n_channels // 2] + residual[..., :n_channels // 2]
+            residual_fwd = x + residual
             x_fwd = self.submodule(residual_fwd.to(dtype=self.submodule.weight.dtype))
 
-            residual_rc = self.rc(x[..., n_channels // 2:]) + self.rc(residual[..., n_channels // 2:])
+            residual_rc = self.rc(x) + self.rc(residual)
             x_rc = self.submodule(residual_rc.to(dtype=self.submodule.weight.dtype))
 
-            residual = torch.cat([residual_fwd, self.rc(residual_rc)], dim=-1)
-            x = torch.cat([x_fwd, self.rc(x_rc)], dim=-1)
+            residual = (residual_fwd + self.rc(residual_rc)) / 2
+            x = (x_fwd + self.rc(x_rc)) / 2
 
         return x if not prenorm else (x, residual)
 
 
 class RCPSMambaBlock(nn.Module):
     def __init__(
-            self,
-            dim,
-            mixer_cls,
-            norm_cls=nn.LayerNorm,
-            fused_add_norm=False,
-            residual_in_fp32=False,
-            device=None,  # Keep for consistency with original Mamba Block
-            dtype=None,  # Keep for consistency with original Mamba Block
+        self,
+        dim,
+        mixer_cls,
+        norm_cls=nn.LayerNorm,
+        fused_add_norm=False,
+        residual_in_fp32=False,
+        device=None,  # Keep for consistency with original Mamba Block
+        dtype=None,  # Keep for consistency with original Mamba Block
     ):
         """RCPS version of simple block wrapping a mixer class with LayerNorm/RMSNorm and residual connection.
 
@@ -153,12 +165,15 @@ class RCPSMambaBlock(nn.Module):
         self.norm = norm_f if fused_add_norm else RCPSAddNormWrapper(norm_f)
         if self.fused_add_norm:
             assert RMSNorm is not None, "RMSNorm import fails"
-            assert isinstance(
-                self.norm, (nn.LayerNorm, RMSNorm)
-            ), "Only LayerNorm and RMSNorm are supported for fused_add_norm"
+            assert isinstance(self.norm, (nn.LayerNorm, RMSNorm)), (
+                "Only LayerNorm and RMSNorm are supported for fused_add_norm"
+            )
 
     def forward(
-        self, hidden_states: Tensor, residual: Optional[Tensor] = None, inference_params=None
+        self,
+        hidden_states: Tensor,
+        residual: Optional[Tensor] = None,
+        inference_params=None,
     ):
         r"""Pass the input through the encoder layer.
 
@@ -168,33 +183,39 @@ class RCPSMambaBlock(nn.Module):
             inference_params: inference parameters for mixer.
         """
         if not self.fused_add_norm:
-            hidden_states, residual = self.norm(hidden_states, residual=residual, prenorm=True)
+            hidden_states, residual = self.norm(
+                hidden_states, residual=residual, prenorm=True
+            )
             if self.residual_in_fp32:
                 residual = residual.to(torch.float32)
         else:
-            fused_add_norm_fn = rms_norm_fn if isinstance(self.norm, RMSNorm) else layer_norm_fn
+            fused_add_norm_fn = (
+                rms_norm_fn if isinstance(self.norm, RMSNorm) else layer_norm_fn
+            )
 
             hidden_states_fwd, residual_fwd = fused_add_norm_fn(
-                hidden_states[..., hidden_states.shape[-1] // 2:],
+                hidden_states,
                 self.norm.weight,
                 self.norm.bias,
-                residual=residual[..., hidden_states.shape[-1] // 2:] if residual is not None else None,
+                residual=residual if residual is not None else None,
                 prenorm=True,
                 residual_in_fp32=self.residual_in_fp32,
                 eps=self.norm.eps,
             )
 
             hidden_states_rc, residual_rc = fused_add_norm_fn(
-                hidden_states[..., :hidden_states.shape[-1] // 2].flip(dims=[-2, -1]),
+                hidden_states.flip(dims=[-2, -1]),
                 self.norm.weight,
                 self.norm.bias,
-                residual=residual[..., :hidden_states.shape[-1] // 2].flip(dims=[-2, -1]) if residual is not None else None,
+                residual=residual.flip(dims=[-2, -1]) if residual is not None else None,
                 prenorm=True,
                 residual_in_fp32=self.residual_in_fp32,
                 eps=self.norm.eps,
             )
-            hidden_states = torch.cat([hidden_states_fwd, hidden_states_rc.flip(dims=[-2, -1])], dim=-1)
-            residual = torch.cat([residual_fwd, residual_rc.flip(dims=[-2, -1])], dim=-1)
+            hidden_states = (
+                hidden_states_fwd + hidden_states_rc.flip(dims=[-2, -1])
+            ) / 2
+            residual = (residual_fwd + residual_rc.flip(dims=[-2, -1])) / 2
         hidden_states = self.mixer(hidden_states, inference_params=inference_params)
         return hidden_states, residual
 
@@ -203,12 +224,17 @@ class RCPSMambaBlock(nn.Module):
 
         Keep for compatibility with original Mamba Block.
         """
-        return self.mixer.allocate_inference_cache(batch_size, max_seqlen, dtype=dtype, **kwargs)
+        return self.mixer.allocate_inference_cache(
+            batch_size, max_seqlen, dtype=dtype, **kwargs
+        )
 
 
 class RCPSLMHead(nn.Module):
     """LM Head for reverse-complement equivariant inputs, which have dim * 2 relative to standard inputs."""
-    def __init__(self, true_dim: int, vocab_size: int, complement_map: dict, **factory_kwargs):
+
+    def __init__(
+        self, true_dim: int, vocab_size: int, complement_map: dict, **factory_kwargs
+    ):
         """
         `true_dim` corresponds to the actual dimensionality of the input were it not reverse-complement
         equivariant, i.e. 0.5 times the actual input dim.
@@ -216,7 +242,7 @@ class RCPSLMHead(nn.Module):
         super().__init__()
         self.register_buffer(
             "complement_map",
-            torch.tensor(list(OrderedDict(complement_map).values()), dtype=torch.long)
+            torch.tensor(list(OrderedDict(complement_map).values()), dtype=torch.long),
         )
         self.true_dim = true_dim
         self.lm_head = nn.Linear(true_dim, vocab_size, bias=False, **factory_kwargs)
@@ -236,11 +262,10 @@ class RCPSLMHead(nn.Module):
             x: Input tensor of shape (batch_size, seq_len, dim), where dim = 2 * true_dim.
         """
         n_channels = x.shape[-1]
-        assert n_channels == 2 * self.true_dim, "Input must have 2 * true_dim channels."
-        fwd_logits = F.linear(x[..., :n_channels // 2], self.weight, bias=self.lm_head.bias)
+        fwd_logits = F.linear(x, self.weight, bias=self.lm_head.bias)
         rc_logits = F.linear(
-            torch.flip(x[..., n_channels // 2:], dims=[-1]),
+            torch.flip(x, dims=[-1]),
             self.weight[self.complement_map, :],
-            bias=self.lm_head.bias
+            bias=self.lm_head.bias,
         )
-        return fwd_logits + rc_logits
+        return (fwd_logits + rc_logits) / 2

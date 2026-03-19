@@ -1,6 +1,6 @@
 _target_: wrappers.hnet.build_model
 _convert_: "all"
-_modelstr_: "cad_${model.arch_layout}_kmer=${model.k}_D=${model.d_model}"
+_modelstr_: "cad_exp_${model.arch_layout}_kmer=${model.k}_D=${model.d_model}"
 
 arch_layout: ["C3T1C19"] #architecture for DNA from Table 7 with best PPL in HNet paper
 d_model: [512] #d_model of each stage (matches stages from arch_layout)
