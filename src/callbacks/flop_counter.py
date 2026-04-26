@@ -251,22 +251,32 @@ class BPredMonitor(Callback):
         B, L, _ = state.outputs.logits.shape
         bpred_out = state.outputs.bpred_output  # list of bpred outputs
         # TODO: remove reshape, it's slow AF but using it to visualize indiv batches
-        mask = bpred_out[0].boundary_mask.reshape(B, L)  # [B, L]
-        num_tokens = torch.tensor([L] * B, device=mask.device, dtype=torch.long)
-        compression_ratio = (
-            calc_compression_ratio(num_tokens=num_tokens, mask=mask)
-            .float()
-            .detach()
-            .clone()
-        )  # [B]
-        bpics = calc_bpic_effecient(mask).detach().clone()
-        self.history_eval_cr.append(compression_ratio)
-        self.history_eval_bpic.append(bpics)
+        num_stages = len(bpred_out)  # always a list of len stages
+        # Expand tracker to multi stage if using
+        if len(self.history_eval_cr) < num_stages:
+            for stage_idx in range(num_stages):
+                self.history_eval_bpic.append([])
+                self.history_eval_cr.append([])
+        for stage_idx in range(num_stages):
+            if stage_idx > 0:  # ignore multi-stage for now
+                continue
+            mask = bpred_out[stage_idx].boundary_mask.reshape(B, L)  # [B, L]
+            num_tokens = torch.tensor([L] * B, device=mask.device, dtype=torch.long)
+            compression_ratio = (
+                calc_compression_ratio(num_tokens=num_tokens, mask=mask)
+                .float()
+                .detach()
+                .clone()
+            )  # [B]
+            bpics = calc_bpic_effecient(mask).detach().clone()
+            self.history_eval_cr[stage_idx].append(compression_ratio)
+            self.history_eval_bpic[stage_idx].append(bpics)
 
     def eval_end(self, state: State, logger: Logger):
         self.in_train = True
-        compression_ratios = torch.cat(self.history_eval_cr, dim=0)  # [num_seqs]
-        bpics = torch.cat(self.history_eval_bpic, dim=0)  # [num_chunks]
+        # only tracks fist stage, TODO: track multi stage (as seperate logs)
+        compression_ratios = torch.cat(self.history_eval_cr[0], dim=0)  # [num_seqs]
+        bpics = torch.cat(self.history_eval_bpic[0], dim=0)  # [num_chunks]
         log = {
             f"Boundaries/{state.dataloader_label} Eval/Mean Seq Perc chunked (1=Single Big Chunk)": compression_ratios.float()
             .mean()
