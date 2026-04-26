@@ -7,7 +7,7 @@ from .modeling_caduceus import (
     CaduceusForSequenceClassification,
     BiMambaWrapper,
 )
-from .tokenization_caduceus import CaduceusTokenizer, KMerTokenizer
+from .tokenization_caduceus import CaduceusTokenizer, KMerTokenizer, ByteTokenizer
 
 # __all__ = [
 #    "CaduceusConfig",

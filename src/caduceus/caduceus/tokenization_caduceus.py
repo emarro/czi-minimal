@@ -2,6 +2,8 @@
 
 import torch
 
+import numpy as np
+
 from typing import List, Optional, Dict, Sequence, Tuple
 
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
@@ -345,3 +347,225 @@ class KMerTokenizer(PreTrainedTokenizerFast):
         print(f"Full Tokenized: {full_seq}")
         assert False
         return full_seq
+
+
+class ByteTokenizer(PreTrainedTokenizer):
+    model_input_names = ["input_ids"]
+    _auto_map = {
+        "AutoTokenizer": ["caduceus_tokenization_caduceus.ByteTokenizer", None]
+    }  # second entry should be fasttokenizer version
+
+    def __init__(self, model_max_length=8192, padding_side="right"):
+        self.bos_idx = 254
+        self.eos_idx = 255
+        self.pad_idx = 256
+        self.mask_idx = 257
+        self.cls_idx = 258
+        self.sep_idx = 259
+        self.unk_idx = 260
+        self.dtype = (
+            np.uint16
+        )  # Changed from np.uint8 to np.uint16 to accommodate special tokens
+
+        vocab = {}
+        for i in range(254):
+            vocab[chr(i)] = i
+
+        self.bos_token = "[BOS]"
+        self.eos_token = "[EOS]"
+        self.pad_token = "[PAD]"
+        self.mask_token = "[MASK]"
+        self.cls_token = "[CLS]"
+        self.sep_token = "[SEP]"
+        self.unk_token = "[UNK]"
+
+        vocab[self.bos_token] = self.bos_idx
+        vocab[self.eos_token] = self.eos_idx
+        vocab[self.pad_token] = self.pad_idx
+        vocab[self.mask_token] = self.mask_idx
+        vocab[self.cls_token] = self.cls_idx  # Add to vocab
+        vocab[self.sep_token] = self.sep_idx  # Add to vocab
+        vocab[self.unk_token] = self.unk_idx  # Add to vocab
+        self._vocab = vocab
+
+        super().__init__(
+            bos_token=self.bos_token,
+            eos_token=self.eos_token,
+            unk_token=self.unk_token,  # Pass the unk_token here
+            pad_token=self.pad_token,
+            cls_token=self.cls_token,  # Pass the cls_token here
+            sep_token=self.sep_token,  # Pass the sep_token here
+            model_max_length=model_max_length,  # Added argument
+            padding_side=padding_side,  # Added argument
+        )
+
+    @property
+    def vocab_size(self):
+        return 261  # 0-253 for regular bytes, rest for special toks
+
+    # Fixed vocabulary with no vocab file
+
+    def save_vocabulary(
+        self, save_directory: str, filename_prefix: Optional[str] = None
+    ) -> Tuple:
+        return ()
+
+    def get_vocab(self) -> dict[str, int]:
+        return self._vocab
+
+    def _tokenize(self, text: str) -> list[str]:
+        tokens = []
+        for b in text.encode("utf-8"):
+            tokens.append(chr(b))
+        return tokens
+
+    def _convert_token_to_id(self, token: str) -> int:
+        if token == self.bos_token:
+            return self.bos_idx
+        if token == self.eos_token:
+            return self.eos_idx
+        if token == self.pad_token:
+            return self.pad_idx
+        if token == self.mask_token:
+            return self.mask_idx
+        if token == self.cls_token:
+            return self.cls_idx  # Add to vocab
+        if token == self.sep_token:
+            return self.sep_idx  # Add to vocab
+        if token == self.unk_token:
+            return self.unk_idx  # Add to vocab
+        if len(token) == 1:
+            byte_id = ord(token)
+            if 0 <= byte_id < 254:
+                return byte_id
+        raise KeyError(f"Token '{token}' not in vocabulary.")
+
+    def _convert_id_to_token(self, index: int) -> str:
+        if index == self.bos_idx:
+            return self.bos_token
+        if index == self.eos_idx:
+            return self.eos_token
+        if index == self.pad_idx:
+            return self.pad_token
+        if index == self.mask_idx:
+            return self.mask_token
+        if index == self.cls_idx:
+            return self.cls_token  # Add to vocab
+        if index == self.sep_idx:
+            return self.sep_token  # Add to vocab
+        if index == self.unk_idx:
+            return self.unk_token  # Add to vocab
+        if 0 <= index < 254:
+            return chr(index)
+        # If it's a special token ID, but not explicitly handled as a byte char range
+        raise ValueError(f"ID '{index}' not in vocabulary.")
+
+    def __len__(self):
+        return self.vocab_size
+
+    def __call__(self, *args, **kwargs):
+        return self.encode(*args, **kwargs)
+
+    def encode(
+        self,
+        seqs: list[str],
+        add_bos: bool = False,
+        add_eos: bool = False,
+        padding: bool = False,
+        max_length: int | None = None,
+        return_tensors: str | None = None,
+        **kwargs,
+    ) -> list[dict[str, np.ndarray]]:
+        total_outputs = []
+        for text in seqs:
+            text_byte = text.encode("utf-8")
+
+            if add_bos:
+                text_byte = bytes([self.bos_idx]) + text_byte
+            if add_eos:
+                text_byte = text_byte + bytes([self.eos_idx])
+
+            text_byte_ids = list(bytearray(text_byte))
+
+            if padding:
+                current_max_length = (
+                    max_length if max_length is not None else self.model_max_length
+                )
+                if len(text_byte_ids) < current_max_length:
+                    # Pad to the right (default for `padding_side`) or left if specified
+                    if self.padding_side == "right":
+                        text_byte_ids = text_byte_ids + [self.pad_idx] * (
+                            current_max_length - len(text_byte_ids)
+                        )
+                    elif self.padding_side == "left":
+                        text_byte_ids = [self.pad_idx] * (
+                            current_max_length - len(text_byte_ids)
+                        ) + text_byte_ids
+                elif len(text_byte_ids) > current_max_length:
+                    # Truncate if too long
+                    if self.padding_side == "right":
+                        text_byte_ids = text_byte_ids[:current_max_length]
+                    elif self.padding_side == "left":
+                        text_byte_ids = text_byte_ids[-current_max_length:]
+
+            input_ids_array = np.array(text_byte_ids, dtype=self.dtype)
+
+            if return_tensors == "pt":
+                total_outputs.append({"input_ids": torch.tensor(input_ids_array)})
+            else:
+                total_outputs.append({"input_ids": input_ids_array})
+
+        return total_outputs
+
+    def decode(
+        self,
+        tokens: np.ndarray | list[int],
+        skip_special_tokens: bool = False,
+        **kwargs,
+    ) -> str:
+        if isinstance(tokens, np.ndarray):
+            tokens = tokens.tolist()
+
+        # Define all special token IDs for filtering
+        all_special_ids = [
+            self.bos_idx,
+            self.eos_idx,
+            self.pad_idx,
+            self.mask_idx,
+            self.cls_idx,
+            self.sep_idx,
+            self.unk_idx,
+        ]
+
+        if skip_special_tokens:
+            # Filter out all special tokens and then decode the remaining byte IDs
+            filtered_tokens = [t for t in tokens if t not in all_special_ids]
+            return bytearray(filtered_tokens).decode("utf-8", **kwargs)
+        else:
+            # When not skipping special tokens, we want to represent them as strings
+            # while correctly decoding actual byte sequences.
+            decoded_parts = []
+            current_byte_segment = []
+
+            for token_id in tokens:
+                if token_id in all_special_ids:
+                    # If a special token is encountered, decode any accumulated byte segment
+                    if current_byte_segment:
+                        decoded_parts.append(
+                            bytearray(current_byte_segment).decode("utf-8", **kwargs)
+                        )
+                        current_byte_segment = []  # Reset for the next byte segment
+                    # Append the string representation of the special token
+                    decoded_parts.append(self._convert_id_to_token(token_id))
+                elif 0 <= token_id < 254:  # This is a valid UTF-8 byte ID
+                    current_byte_segment.append(token_id)
+                # Any other case (like ID > 253 but not in all_special_ids) implies an unhandled token,
+                # but with our current setup, all IDs >= 254 are indeed special tokens.
+
+            # Decode any remaining byte segment at the end of the list
+            if current_byte_segment:
+                decoded_parts.append(
+                    bytearray(current_byte_segment).decode("utf-8", **kwargs)
+                )
+
+            return "".join(decoded_parts)
