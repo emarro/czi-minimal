@@ -49,6 +49,9 @@ class CausalLMOutput:
     ar_loss: torch.FloatTensor
     ratio_loss: torch.FloatTensor
     total_flops: torch.FloatTensor
+    encoder_logits: torch.FloatTensor
+    encoder_ar_loss: torch.FloatTensor
+    target_compresion: torch.FloatTensor
 
 
 def cross_entropy(
@@ -106,6 +109,7 @@ class HNetForCausalLM(PreTrainedModel):
         self.config = config
 
         vocab_size = self.config.vocab_size
+        self.vocab_size = vocab_size
         d_embed = self.config.d_model[0]
         factory_kwargs = {"device": device, "dtype": dtype}
 
@@ -125,6 +129,7 @@ class HNetForCausalLM(PreTrainedModel):
             stage_idx=0,
             # Pass flops_counter so all inner stages can update
             flops_counter=self.flops_counter,
+            vocab_size=self.vocab_size,
             **factory_kwargs,
         )
         self.lm_head = nn.Linear(d_embed, vocab_size, bias=False, **factory_kwargs)
@@ -208,7 +213,7 @@ class HNetForCausalLM(PreTrainedModel):
         num_tokens = torch.tensor(
             [L] * B, device=hidden_states.device
         )  # number of tokens for each seq in batch
-        hidden_states, bpred_output = self.backbone(
+        hidden_states, encoder_hidden, bpred_output = self.backbone(
             hidden_states,
             cu_seqlens=cu_seqlens,
             max_seqlen=max_seqlen,
@@ -219,10 +224,22 @@ class HNetForCausalLM(PreTrainedModel):
         )
 
         hidden_states = hidden_states.view(B, L, D)
+        if encoder_hidden is not None:
+            encoder_hidden = encoder_hidden.view(B, L, -1)
 
         if num_last_tokens > 0:
             hidden_states = hidden_states[:, -num_last_tokens:]
         lm_logits = self.lm_head(hidden_states)
+        encoder_logits = None
+        if encoder_hidden is not None:
+            encoder_logits = self.backbone.routing_module.lm_head(encoder_hidden)
+            if not isinstance(self.backbone.routing_module.lm_head, nn.Identity):
+                self.flops_counter.add_flops(
+                    2
+                    * int(input_ids.numel())
+                    * self.backbone.routing_module.lm_head.in_features
+                    * self.backbone.routing_module.lm_head.out_features
+                )
 
         # Add the FLOPs for the LM head
         if not isinstance(self.lm_head, nn.Identity):
@@ -234,9 +251,10 @@ class HNetForCausalLM(PreTrainedModel):
             )
         total_flops = self.flops_counter.get_flops()
 
-        loss = None
-        ar_loss = None
-        ratio_loss_sum = None
+        loss = None  # total loss tracker
+        ar_loss = None  # LM loss for whole model
+        encoder_loss = None  # LM loss for just the encoder
+        ratio_loss_sum = None  # ratio loss across all stages
         unreduced_ar_loss = None
         # print(f"Model config: {self.config}")
         if labels is not None:
@@ -247,9 +265,54 @@ class HNetForCausalLM(PreTrainedModel):
                     labels=labels,
                     loss_weights=loss_weights,
                     pad_token_id=self.config.pad_token_id,
-                )
+                )  # due to how we weight we're already taking mean over seq len
                 unreduced_ar_loss = ar_loss  # [B * L]
                 ar_loss = ar_loss.sum()
+                if encoder_logits is not None:
+                    # print(f"Input logits: {encoder_logits} ({encoder_logits.shape})")
+                    encoder_loss = cross_entropy(
+                        logits=encoder_logits,
+                        labels=labels,
+                        # loss_weights=loss_weights,
+                        pad_token_id=self.config.pad_token_id,
+                    )
+                    unreduced_encoder_loss = encoder_loss  # [B * L]
+                    unreduced_encoder_loss = unreduced_encoder_loss.reshape(B, L)
+                    # print(
+                    #    f"Encoder NLL: {unreduced_encoder_loss} ({unreduced_encoder_loss.shape})"
+                    # )
+                    seq_NLL = unreduced_encoder_loss.sum(dim=-1)  # [B]
+
+                    expected_bits = seq_NLL / torch.log(
+                        torch.tensor([2], device=seq_NLL.device)
+                    )
+                    V = self.vocab_size
+                    if V < 32:  # in DNA TODO: replace with field in cfg somewhere
+                        V = 4  # vocab size of 4
+                    true_vocab_size = torch.tensor([V], device=expected_bits.device)
+                    expected_toks = expected_bits / torch.log2(true_vocab_size)
+                    expected_N = L / torch.clamp(expected_toks, min=1.0, max=L)
+                    encoder_loss = unreduced_encoder_loss.mean(
+                        dim=-1
+                    ).mean()  # Get average NLL per seq then take batchmean
+
+                    # ar_loss = ar_loss + 0.50 * encoder_loss
+                    # if encoder_loss.item() < 1.5:
+                    target_ratio = torch.clamp(expected_N, min=2.0, max=L)
+                    if False and target_ratio.max() > 2.0:
+                        print(
+                            f"seq NLL: {seq_NLL.mean()} (min={seq_NLL.min()}) ({seq_NLL.shape})"
+                        )
+                        print(
+                            f"Bits Needed: {expected_bits.mean()} (min={expected_bits.min()}) ({expected_bits.shape})"
+                        )
+                        print(
+                            f"Toks Needed: {expected_toks.mean()} (min={expected_toks.min()}) ({expected_toks.shape})"
+                        )
+                        print(f"Encoder loss: {encoder_loss} ({encoder_loss.shape})")
+                        print(
+                            f"Expected N for seqs: {target_ratio.mean()} (max={target_ratio.max()}) ({target_ratio.shape})"
+                        )
             else:
                 ar_loss = cross_entropy(
                     logits=lm_logits,
@@ -257,16 +320,21 @@ class HNetForCausalLM(PreTrainedModel):
                     pad_token_id=self.config.pad_token_id,
                 )
                 unreduced_ar_loss = ar_loss  # [B * L]
-                ar_loss = ar_loss.sum()
+                ar_loss = ar_loss.mean()
             loss = ar_loss
             # TODO: target_ratio should be a list (allow diff ratio per stage), currently fixed
             if target_ratio is not None:
                 ratio_loss_sum = 0.0
+                stage_idx = 0
                 for bpred_stage in bpred_output:
                     # Calculate the ratio_loss for each stage
                     boundary_mask = bpred_stage.boundary_mask  #  [B * seq_len]
                     boundary_probs = bpred_stage.boundary_prob  # [B * seq_len, 2]
                     boundary_probs = boundary_probs[:, 1]  # [B *seq_len]
+                    # print(
+                    #    f"Boundary mask for stage {stage_idx}: {boundary_mask} ({boundary_mask.shape})"
+                    # )
+                    # print(f"Target ratio for stage {stage_idx}: {target_ratio}")
 
                     # NOTE: According to June we should flatten instead of taking the batchmean. No real effect on DNA (where L is constant)
                     # Leaving old logic for possible future exprimentation with varying target_ratio per batch
@@ -275,18 +343,42 @@ class HNetForCausalLM(PreTrainedModel):
                     # f_loss = torch.sum(boundary_mask, dim=-1) * (1 / L)  # [1]
                     # g_loss = torch.sum(boundary_probs, dim=-1) * (1 / L)  # [1]
                     # cast boundary mask to same dypte as boundary_probs (mean doesn't work with bool types)
-                    f_loss = torch.mean(
-                        boundary_mask.to(boundary_probs.dtype), dim=-1
-                    )  # [1]
-                    g_loss = torch.mean(boundary_probs, dim=-1)  # [1]
+                    if (
+                        stage_idx == 0 or self.backbone.selection == "shannon-N"
+                    ):  # always do calcs per seq
+                        boundary_mask = boundary_mask.to(boundary_probs.dtype).reshape(
+                            B, L
+                        )
+                        boundary_probs = boundary_probs.reshape(B, L)
+                        f_loss = torch.sum(boundary_mask, dim=-1) * (1 / L)  # [B]
+                        g_loss = torch.sum(boundary_probs, dim=-1) * (1 / L)  # [B]
+                    else:  # leave averaged calcs out for logging
+                        f_loss = torch.mean(
+                            boundary_mask.to(boundary_probs.dtype), dim=-1
+                        )  # [1]
+                        g_loss = torch.mean(boundary_probs, dim=-1)  # [1]
 
                     stage_ratio_loss = (target_ratio / (target_ratio - 1)) * (
                         (target_ratio - 1) * f_loss * g_loss
                         + (1 - f_loss) * (1 - g_loss)
                     )  # [1]
+                    if False:
+                        print(
+                            f"Target ratios per seq {target_ratio} ({target_ratio.shape})"
+                        )
+                        print(f"Num boundaries per seq: {f_loss * L} ({f_loss.shape})")
+                        print(f"Achieved Compression: {1 / f_loss} ({f_loss.shape})")
+                        print(
+                            f"Ratio loss per seq {stage_ratio_loss} ({stage_ratio_loss.shape})"
+                        )
                     ratio_loss_sum += stage_ratio_loss.mean()  # [1]
+                    stage_idx += 1
                 # L = L_ar + \alpha * \sum_{stages} {L_ratio}
-                loss = ar_loss + (self.config.ratio_loss_weight * ratio_loss_sum)
+                loss = (
+                    ar_loss
+                    + (self.config.ratio_loss_weight * ratio_loss_sum)
+                    + 0.5 * (encoder_loss if encoder_loss is not None else 0.0)
+                )
 
         CausalLMOutput = namedtuple(
             "CausalLMOutput",
@@ -300,6 +392,9 @@ class HNetForCausalLM(PreTrainedModel):
                 "ar_loss",
                 "ratio_loss",
                 "total_flops",
+                "encoder_logits",
+                "encoder_ar_loss",
+                "target_compression",
             ],
         )
         return CausalLMOutput(
@@ -312,6 +407,9 @@ class HNetForCausalLM(PreTrainedModel):
             ar_loss=ar_loss,
             ratio_loss=ratio_loss_sum,
             total_flops=total_flops,
+            encoder_logits=encoder_logits,
+            encoder_ar_loss=encoder_loss,
+            target_compression=target_ratio,
         )
 
     def step(self, input_ids, inference_params):

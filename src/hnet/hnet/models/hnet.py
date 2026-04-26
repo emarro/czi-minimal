@@ -51,6 +51,7 @@ class HNet(nn.Module):
         flops_counter: FlopsCounter,
         device=None,
         dtype=None,
+        vocab_size=256,
     ) -> None:
         super().__init__()
         factory_kwargs = {"device": device, "dtype": dtype}
@@ -61,6 +62,7 @@ class HNet(nn.Module):
         self.alpha = config.alpha
         self.beta = config.beta
         self.flops_counter = flops_counter
+        self.vocab_size = vocab_size
 
         arch_layout = config.arch_layout
         for _ in range(stage_idx):
@@ -111,6 +113,7 @@ class HNet(nn.Module):
                 selection=self.selection,
                 alpha=self.alpha,
                 beta=self.beta,
+                vocab_size=self.vocab_size,
                 **factory_kwargs,
             )
             self.chunk_layer = ChunkLayer()
@@ -279,7 +282,7 @@ class HNet(nn.Module):
                 **mixer_kwargs,
             )
             hidden_states = hidden_states[..., :D]
-            return hidden_states, []
+            return hidden_states, None, []
 
         ##############################################################
         # ---------------------H-Net Fwd -----------------------------#
@@ -298,6 +301,9 @@ class HNet(nn.Module):
             num_tokens=num_tokens,
             **mixer_kwargs,
         )
+        encoder_hidden = None
+        if "shannon" in self.selection:
+            encoder_hidden = hidden_states.clone()  # encoder hidden_states
 
         hidden_states_for_residual = hidden_states.to(
             dtype=self.residual_proj.weight.dtype
@@ -324,7 +330,7 @@ class HNet(nn.Module):
         # ---------------------H-Net Main ---------------------------#
         ##############################################################
 
-        hidden_states, prev_boundary_predictions = self.main_network(
+        outs = self.main_network(
             hidden_states,
             cu_seqlens=next_cu_seqlens,
             max_seqlen=next_max_seqlen,
@@ -333,6 +339,14 @@ class HNet(nn.Module):
             num_tokens=next_num_tokens,
             **mixer_kwargs,
         )
+        if len(outs) == 2:
+            hidden_states, prev_boundary_predictions = outs
+        elif len(outs) == 3:
+            hidden_states, _, prev_boundary_predictions = outs
+        else:
+            raise Exception(
+                f"Unrecognized outputs from main network {outs} of len ({len(outs)})"
+            )
 
         ##############################################################
         # ---------------------H-Net Post ---------------------------#
@@ -375,14 +389,15 @@ class HNet(nn.Module):
                 p.numel() for p in self.routing_module.parameters()
             )
 
+            # Linear Projection costs in router, assumes no bias and single layer
             self.flops_counter.add_flops(
                 2
-                * int(num_tokens.sum().item())
+                * int(num_tokens.sum().item())  # number of tokens into the router
                 * (residual_proj_param_count + router_param_count)
             )
 
         hidden_states = hidden_states[..., :D]
-        return hidden_states, [bpred_output, *prev_boundary_predictions]
+        return hidden_states, encoder_hidden, [bpred_output, *prev_boundary_predictions]
 
     def step(self, hidden_states, inference_params):
         D = hidden_states.shape[-1]

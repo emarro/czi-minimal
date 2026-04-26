@@ -18,8 +18,18 @@ class ComposerWrapper(HuggingFaceModel):
         self.val_loss.tag = ""
         self.train_ar_loss = RunningMean()
         self.train_ar_loss.tag = "ar"
+        self.train_encoder_ar_loss = RunningMean()
+        self.train_encoder_ar_loss.tag = "enc_ar"
+        self.train_target_compression = RunningMean()
+        self.train_target_compression.tag = "target_N"
         self.val_ar_loss = MeanMetric()
         self.val_ar_loss.tag = "ar"
+
+        self.val_encoder_ar_loss = MeanMetric()
+        self.val_encoder_ar_loss.tag = "enc_ar"
+        self.val_target_compression = MeanMetric()
+        self.val_target_compression.tag = "target_N"
+
         self.train_ratio_loss = RunningMean()
         self.train_ratio_loss.tag = "ratio"
         self.val_ratio_loss = MeanMetric()
@@ -106,9 +116,9 @@ class ComposerWrapper(HuggingFaceModel):
         ):  # not in the zero-shot eval task
             val = None
             if metric.tag == "ar":
-                val = outputs.ar_loss  # if not self.mlm else None
+                val = outputs.ar_loss if not self.mlm else outputs.loss
             elif metric.tag == "ratio":
-                val = outputs.ratio_loss  # if not self.mlm else None
+                val = outputs.ratio_loss if not self.mlm else None
             elif metric.tag == "acc":
                 B, L, V = outputs.logits.shape
                 preds = outputs.logits.softmax(dim=-1).argmax(dim=-1)
@@ -123,6 +133,14 @@ class ComposerWrapper(HuggingFaceModel):
                     # labels[labels == -100] = 0
                 metric.update(preds, labels)
                 return
+            elif "enc" in metric.tag:
+                val = outputs.encoder_ar_loss
+            elif metric.tag == "target_N":
+                val = (
+                    outputs.target_compression.mean()
+                    if outputs.target_compression is not None
+                    else 1.0
+                )  # by default gives ratio per seq, get mean per batch
             else:
                 val = outputs.loss
             if val is not None:
@@ -222,14 +240,18 @@ class ComposerWrapper(HuggingFaceModel):
         if is_train:
             return {
                 "ARLoss": self.train_ar_loss,
+                "EncoderARLoss": self.train_encoder_ar_loss,
                 "RatioLoss": self.train_ratio_loss,
                 "Accuracy": self.train_acc,
+                "EncoderTargetN": self.train_target_compression,
             }
         return {
             "PearsonCorrCoef": self.val_pcc,
             "AUROC": self.val_auroc,
             "EvalLoss": self.val_loss,
             "ARLoss": self.val_ar_loss,
+            "EncoderARLoss": self.val_encoder_ar_loss,
             "RatioLoss": self.val_ratio_loss,
             "Accuracy": self.val_acc,
+            "EncoderTargetN": self.val_target_compression,
         }

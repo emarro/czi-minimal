@@ -191,7 +191,14 @@ class DeChunkState:
 
 class RoutingModule(nn.Module):
     def __init__(
-        self, d_model, selection="cos", alpha=None, beta=None, device=None, dtype=None
+        self,
+        d_model,
+        selection="cos",
+        alpha=None,
+        beta=None,
+        device=None,
+        dtype=None,
+        vocab_size=256,
     ):
         self.d_model = d_model
         factory_kwargs = {"device": device, "dtype": dtype}
@@ -229,6 +236,23 @@ class RoutingModule(nn.Module):
             )
             self.alpha = alpha
             self.beta = beta
+        elif "shannon" in selection:  # either shannon-N or shannon-B
+            # NOTE: not well defined for the MLM case yet, assumes AR
+            # shannon-N, adapative N based on the NLL of the given seq (NLL \propto bits we need to losslessly compress input)
+            # shannon-B, pick (expected) number of bits we want per chunk and chunk seq s.t. our bounds line up with this
+            self.bits_per_chunk = 2  # shannon-B param, put bounds where we expect to need [bits_per_chunk] bits for the prev toks
+            vocab_size = vocab_size  # lookup vocab size in cfg later
+            # LM head for the encoder, lets us get NLL and compression rates for the given seq (under this encoder)
+            self.lm_head = nn.Linear(d_model, vocab_size, bias=False, **factory_kwargs)
+            # if we're only using entropy for N calcs, still need the MLP for bound preds
+            if selection == "shannon-N":
+                self.mlp = nn.Sequential(
+                    nn.Linear(self.d_model, 1, bias=False),
+                    # nn.GELU(),
+                    # nn.Linear(self.d_model * 2, 1),
+                    nn.Sigmoid(),
+                )
+
         else:
             raise Exception(f"Unrecognized selection mechanism {selection}")
 
@@ -269,7 +293,7 @@ class RoutingModule(nn.Module):
             )
             boundary_prob = torch.clamp(((1 - cos_sim) / 2), min=0.0, max=1.0)
             boundary_prob = F.pad(boundary_prob, (1, 0), "constant", PAD_PROB)
-        elif self.selection == "mlp":
+        elif self.selection == "mlp" or self.selection == "shannon-N":
             boundary_prob = self.mlp(hidden_states)[:, 1:, 0]  # [B,L, 1]
             boundary_prob = F.pad(boundary_prob, (1, 0), "constant", PAD_PROB)
         elif self.selection == "os":
@@ -280,6 +304,13 @@ class RoutingModule(nn.Module):
             )
             backpointers = optimal_selection_triton(cos_sim, self.alpha, self.beta)
             boundary_prob.scatter_(1, backpointers, 1.0)
+        elif self.selection == "shannon-B":  # use entropy to call bounds
+            logits = self.lm_head(hidden_states)
+            log_probs = F.log_softmax(logits, dim=-1)
+            print(
+                f"Log prob in shannon-B exp: {torch.exp(log_probs)},  ({log_probs.shape})"
+            )
+            raise NotImplementedError
 
         if cu_seqlens is not None:
             boundary_prob = boundary_prob.squeeze(0)
