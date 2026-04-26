@@ -3,7 +3,7 @@ defaults:
   # pretraining dtaset
   - dataset: angiosperm_16
   # eval dataset(s)
-  - eval_dataset: maize_allele_freq
+  - eval_dataset: null #maize_allele_freq
   # datasets to get boundaries for at certain intervals
   - maize_dataset: null
   # loggers to use (wandb)
