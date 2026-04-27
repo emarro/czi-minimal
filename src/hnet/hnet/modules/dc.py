@@ -12,6 +12,9 @@ from mamba_ssm.ops.triton.ssd_combined import mamba_chunk_scan_combined
 
 from hnet.hnet.modules.utils import get_seq_idx
 
+from .torch_struct import SemiMarkov as SemiMarkovCRF
+from .torch_struct import LinearChain as LinearChainCRF
+
 
 @triton.jit
 def _batched_dp_kernel(
@@ -252,6 +255,34 @@ class RoutingModule(nn.Module):
                     # nn.Linear(self.d_model * 2, 1),
                     nn.Sigmoid(),
                 )
+            elif selection == "shannon-semi-markov-CRF":
+                self.L = 8  # maximum sequence length
+                self.C = 2  # number of differnt segments (2 for binary)
+                # self.convs = nn.ModuleList(
+                #    [
+                #        nn.Conv1d(
+                #            self.d_model, self.d_model, kernel_size=ell, padding=ell - 1
+                #        )
+                #        for ell in range(1, self.L + 1)
+                #    ]
+                # )  # L convolutions, all independent, all parallelisable
+                # approximate with one big kernel of max length? Leakage exists but a problem in practice?
+                # self.convs = nn.Conv1d(
+                #    in_channels=self.d_model,
+                #    out_channels=self.L * self.d_model,
+                #    kernel_size=self.L,
+                #    padding=self.L - 1,
+                # )
+
+                self.W_emit = nn.Linear(
+                    self.d_model, self.C, bias=False
+                )  # scores for each token
+                self.phi_dur = nn.Parameter(
+                    torch.zeros(1, 1, self.L, 1, self.C)
+                )  # scores for different seq lengths
+                self.W_trans = nn.Parameter(
+                    torch.zeros(1, 1, 1, self.C, self.C)
+                )  # fixed tranisition probs
 
         else:
             raise Exception(f"Unrecognized selection mechanism {selection}")
@@ -279,7 +310,9 @@ class RoutingModule(nn.Module):
 
         if cu_seqlens is not None:
             # We are in packed mode, so hidden_states is (T, D). Make it (B, T, D)
-            hidden_states = hidden_states.unsqueeze(0)
+            hidden_states = hidden_states.unsqueeze(0)  # [1, B*T, D]
+            # B = hidden_states.shape[1] // cu_seqlens[1]
+            # hidden_states = hidden_states.reshape(B, hidden_states.shape[1] // B, -1)
         # Force boundary probability of the first element to 1.0
         PAD_PROB = 1.0
         B, L, D = hidden_states.shape
@@ -304,6 +337,27 @@ class RoutingModule(nn.Module):
             )
             backpointers = optimal_selection_triton(cos_sim, self.alpha, self.beta)
             boundary_prob.scatter_(1, backpointers, 1.0)
+        elif self.selection == "lc-CRF":
+            pass
+        elif self.selection == "shannon-semi-markov-CRF":
+            S = torch.cumsum(hidden_states, dim=1)  # [B, L, D]
+            spans = []
+            for ell in range(1, self.L + 1):
+                # sum over [v-ell+1, v] = S[v] - S[v-ell]
+                right = S  # [B, T, D]
+                left = F.pad(S[:, :-1, :], (0, 0, ell - 1, 0))  # shift right by ell
+                mean = (right - left) / ell  # [B, T, D]
+                spans.append(mean)
+            spans = torch.stack(spans, dim=2)  # [B, T, L, D]
+            token_emit = self.W_emit(spans)  # [B, T, L, 2]
+            phi_emit = token_emit.unsqueeze(-2)  # [B T, L, 1, 2]
+            phi = phi_emit + self.phi_dur + self.W_trans
+            log_pots = torch.log(phi)  # [B, T, L, 2, 2]
+            dist = SemiMarkovCRF(log_pots)
+            marginals = dist.marginals  # [B, T, L, 2, 2]
+            marginals = marginals.sum(2).sum(-1)  # [B, T, 2]
+            boundary_prob = marginals[..., 0]
+
         elif self.selection == "shannon-B":  # use entropy to call bounds
             logits = self.lm_head(hidden_states)
             log_probs = F.log_softmax(logits, dim=-1)
