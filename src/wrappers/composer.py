@@ -137,7 +137,7 @@ class ComposerWrapper(HuggingFaceModel):
                 val = outputs.encoder_ar_loss
             elif metric.tag == "target_N":
                 val = (
-                    outputs.target_compression.mean()
+                    outputs.target_compression.float().mean()
                     if outputs.target_compression is not None
                     else 1.0
                 )  # by default gives ratio per seq, get mean per batch
