@@ -242,6 +242,7 @@ class RoutingModule(nn.Module):
         elif selection == "lc-CRF":
             self.C = 2
             self.W_emit = nn.Linear(self.d_model, self.C, bias=False)  # CRF emissios
+            self.W_trans = nn.Parameter(torch.rand(1, 1, self.C, self.C))
             # have a fixed (learned) transistion matrix
             # TODO: probably want this to be conditional on N (especially for learned N)
             # For now just leave it a fixed (learned) parameter
@@ -366,6 +367,22 @@ class RoutingModule(nn.Module):
             )
             backpointers = optimal_selection_triton(cos_sim, self.alpha, self.beta)
             boundary_prob.scatter_(1, backpointers, 1.0)
+        elif self.selection == "lc-CRF":
+            B_prime = hidden_states.size(1) // cu_seqlens[1]
+            L_prime = hidden_states.size(1) // B_prime
+            hidden_states = hidden_states.view(B_prime, L_prime, D)
+            # print(f"Hidden states reshape {hidden_states.shape}")
+            emits = self.W_emit(hidden_states)  # [B, L, C]
+            log_pots = emits.unsqueeze(-1)  # [B, L, C, 1]
+            # global learned transition matrix
+            log_pots = log_pots + self.W_trans  # [B, L, C, C]
+            dist = LinearChainCRF(log_pots)
+            marginals = dist.marginals  # [B, L, C, C]
+            # print(marginals)
+            # print(marginals.shape)
+            boundary_prob = marginals.sum(-1)  # [B, L, C]
+            # boundary_prob = boundary_prob[:, 1:, 0]
+            boundary_prob = boundary_prob.view(1, B_prime * L_prime, self.C)[..., 0]
         elif (
             self.selection == "shannon-lc-CRF"
             or self.selection == "shannon-lc-CRF-trans"
