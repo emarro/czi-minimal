@@ -225,3 +225,6 @@ watch_folder/*
 #model profiler dirs
 composer_profiler/*
 torch_profiler/*
+
+# ignore SLURM scirpts
+submit*.sh
