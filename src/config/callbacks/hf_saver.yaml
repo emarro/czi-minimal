@@ -2,6 +2,6 @@ disable_hf: False
 save_local: False
 save_to_hub: True
 private: False
-hub_repo_id: "emarro/test-hnet-upload-${run_name}"
+hub_repo_id: "emarro/upload-${run_name}"
 save_interval: "2500ba"
 save_folder: "${paths.output_dir}/checkpoints/hf/" # e.g. './{run_name}/ckpt' (local) or 's3://mybucket/mydir/{run_name}/ckpt' (remote)
