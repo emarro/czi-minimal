@@ -377,7 +377,7 @@ class HNetForCausalLM(PreTrainedModel):
                 loss = (
                     ar_loss
                     + (self.config.ratio_loss_weight * ratio_loss_sum)
-                    + 0.5 * (encoder_loss if encoder_loss is not None else 0.0)
+                    + 0.2 * (encoder_loss if encoder_loss is not None else 0.0)
                 )
 
         CausalLMOutput = namedtuple(

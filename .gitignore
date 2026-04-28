@@ -218,3 +218,10 @@ wandb/*
 #path for some local data to process
 local_data/*
 *.pt
+
+#ignore slurm logs
+watch_folder/*
+
+#model profiler dirs
+composer_profiler/*
+torch_profiler/*
