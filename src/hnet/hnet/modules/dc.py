@@ -12,8 +12,8 @@ from mamba_ssm.ops.triton.ssd_combined import mamba_chunk_scan_combined
 
 from hnet.hnet.modules.utils import get_seq_idx
 
-from .torch_struct import SemiMarkov as SemiMarkovCRF
-from .torch_struct import LinearChain as LinearChainCRF
+from .torch_struct import SemiMarkovCRF
+from .torch_struct import LinearChainCRF
 
 
 @triton.jit
@@ -239,6 +239,17 @@ class RoutingModule(nn.Module):
             )
             self.alpha = alpha
             self.beta = beta
+        elif selection == "lc-CRF":
+            self.C = 2
+            self.W_emit = nn.Linear(self.d_model, self.C, bias=False)  # CRF emissios
+            # have a fixed (learned) transistion matrix
+            # TODO: probably want this to be conditional on N (especially for learned N)
+            # For now just leave it a fixed (learned) parameter
+            if self.selection == "shannon-lc-CRF":
+                self.W_trans = nn.Parameter(
+                    torch.rand(1, 1, self.C, self.C)
+                )  # [B, L, C, C]
+
         elif "shannon" in selection:  # either shannon-N or shannon-B
             # NOTE: not well defined for the MLM case yet, assumes AR
             # shannon-N, adapative N based on the NLL of the given seq (NLL \propto bits we need to losslessly compress input)
@@ -255,6 +266,24 @@ class RoutingModule(nn.Module):
                     # nn.Linear(self.d_model * 2, 1),
                     nn.Sigmoid(),
                 )
+            elif selection == "shannon-lc-CRF" or selection == "shannon-lc-CRF-trans":
+                self.C = 2
+                self.W_emit = nn.Linear(
+                    self.d_model, self.C, bias=False
+                )  # CRF emissios
+                # have a fixed (learned) transistion matrix
+                # TODO: probably want this to be conditional on N (especially for learned N)
+                # For now just leave it a fixed (learned) parameter
+                if self.selection == "shannon-lc-CRF":
+                    self.W_trans = nn.Parameter(
+                        torch.rand(1, 1, self.C, self.C)
+                    )  # [B, L, C, C]
+                elif self.selection == "shannon-lc-CRF-trans":
+                    # dumbest possible thing, just fit an MLP to learn C * C matrix
+                    # instatiate a full C*C transitions matrix per token, then view to correct dims
+                    # this becomes a "non-stationary" CRF, theory kinda lacking here, try first to see if it's worth mulling over further?
+                    self.W_trans = nn.Linear(self.d_model, self.C * self.C)
+
             elif selection == "shannon-semi-markov-CRF":
                 self.L = 8  # maximum sequence length
                 self.C = 2  # number of differnt segments (2 for binary)
@@ -337,8 +366,37 @@ class RoutingModule(nn.Module):
             )
             backpointers = optimal_selection_triton(cos_sim, self.alpha, self.beta)
             boundary_prob.scatter_(1, backpointers, 1.0)
-        elif self.selection == "lc-CRF":
-            pass
+        elif (
+            self.selection == "shannon-lc-CRF"
+            or self.selection == "shannon-lc-CRF-trans"
+        ):
+            # NOTE: hidden states come into here as [1, B*L, D]
+            # assume constant sizes for cu_seqlens
+            # print(f"Hidden in {hidden_states.shape}")
+            B_prime = hidden_states.size(1) // cu_seqlens[1]
+            L_prime = hidden_states.size(1) // B_prime
+            hidden_states = hidden_states.view(B_prime, L_prime, D)
+            # print(f"Hidden states reshape {hidden_states.shape}")
+            emits = self.W_emit(hidden_states)  # [B, L, C]
+            log_pots = emits.unsqueeze(-1)  # [B, L, C, 1]
+            if self.selection == "shannon-lc-CRF":
+                # global learned transition matrix
+                log_pots = log_pots + self.W_trans  # [B, L, C, C]
+            elif self.selection == "shannon-lc-CRF-trans":
+                # learn transistions at each position
+                W_trans = self.W_trans(hidden_states).view(
+                    B_prime, L_prime, self.C, self.C
+                )
+                log_pots = log_pots + W_trans
+            # print(f"Transition probs {self.W_trans}")
+            # print(f"Log pots: {log_pots} ({log_pots.shape})")
+            dist = LinearChainCRF(log_pots)
+            marginals = dist.marginals  # [B, L, C, C]
+            # print(marginals)
+            # print(marginals.shape)
+            boundary_prob = marginals.sum(-1)  # [B, L, C]
+            # boundary_prob = boundary_prob[:, 1:, 0]
+            boundary_prob = boundary_prob.view(1, B_prime * L_prime, self.C)[..., 0]
         elif self.selection == "shannon-semi-markov-CRF":
             S = torch.cumsum(hidden_states, dim=1)  # [B, L, D]
             spans = []
