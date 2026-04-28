@@ -67,9 +67,7 @@ class SemiMarkov(_Struct):
         for k in range(1, K - 1):
             mask_length_k = mask_length < (lengths - 1 - (k - 1)).view(batch, 1, 1)
             mask_length_k = semiring.convert(mask_length_k)
-            mask[:, :, :, k - 1, k].diagonal(0, -2, -1).masked_fill_(
-                mask_length_k, True
-            )
+            mask[:, :, :, k - 1, k].diagonal(0, -2, -1).masked_fill_(mask_length_k, True)
         init = semiring.fill(init, mask, semiring.one)
 
         K_1 = K - 1
@@ -100,9 +98,7 @@ class SemiMarkov(_Struct):
 
         # All paths finishing at N with label C
         beta = self._make_chart(N, (batch, C), edge, force_grad)
-        beta[0] = semiring.fill(
-            beta[0], torch.tensor(True).to(edge.device), semiring.one
-        )
+        beta[0] = semiring.fill(beta[0], torch.tensor(True).to(edge.device), semiring.one)
 
         # Main.
         for n in range(1, N):
