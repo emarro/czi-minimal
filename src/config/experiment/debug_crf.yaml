@@ -1,0 +1,31 @@
+# @package _global_
+# let the experiment node modify configs globally
+defaults:
+  - override /model: hnet_small_crf
+  - override /trainer: fixed_batch
+  - override /dataset: fineweb_1b
+  #- override /loggers: wandb
+
+model:
+  mlm: False
+  tokenizer: "byte"
+
+task_name: "debug_text"
+
+optimizer:
+  lr: 5e-4
+dataset:
+  eval_interval: "2000ba"
+
+trainer:
+  global_train_batch_size: 2048
+  device_train_microbatch_size: 256  #depends on the amount of GPU mem available
+  max_duration: "3ep"
+  eval_interval: "1ep"  # Evaluate every 5k batches
+  save_overwrite: False
+  autoresume: True
+  reset_time: False
+
+#loggers:
+#  wandb:
+#    project: "Composer Debug"

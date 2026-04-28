@@ -1,0 +1,7 @@
+_target_: wrappers.pretrained.build_model
+_modelstr_: "vcad2_small_from_pretrained"
+from_scratch: False
+pretrained_name_or_path: "emarro/pcad2_vert_small"
+pad_token_id: -100  # [PAD] token ID
+max_seq_len: 12000
+mlm: True

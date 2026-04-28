@@ -1,31 +1,29 @@
 # @package _global_
 # let the experiment node modify configs globally
 defaults:
-  - override /model: hnet_small_mlp_selection #cnet_tiny
+  - override /model: mlm_small_kmer #cnet_tiny
   - override /trainer: fixed_batch
-  - override /dataset: hg38_512
+  - override /dataset: hg38_8192
   - override /eval_dataset: clinvar
   #- override /maize_dataset: null TODO: override with human chr8
   #- override /loggers: wandb
 
 
-task_name: "debug_hg38_hf"
+task_name: "debug_kmer"
 
 optimizer:
   lr: 5e-4
 
 callbacks:
-  save_interval: "250ba"
+  save_interval: "200ba"
 
 eval_dataset:
   eval_interval: "200ba"
-model:
-  ratio_loss_weight: 0.00
 
 trainer:
-  device_train_microbatch_size: 32  #depends on the amount of GPU mem available
+  device_train_microbatch_size: 16  #depends on the amount of GPU mem available
   max_duration: "300ba"
-  save_interval: "250ba"
+  save_interval: "2ba"
   eval_interval: "200ba"  # Evaluate every 5k batches
   global_train_batch_size: 16
   save_overwrite: False

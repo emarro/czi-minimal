@@ -1,0 +1,30 @@
+# @package _global_
+# let the experiment node modify configs globally
+defaults:
+  - override /model: hnet_small_entropy
+  - override /trainer: fixed_batch
+  - override /loggers: wandb
+
+model:
+  mlm: False
+  tokenizer: "dna"
+
+task_name: "angiosperms_hnet"
+
+optimizer:
+  lr: 5e-4
+dataset:
+  eval_interval: "2000ba"
+
+trainer:
+  device_train_microbatch_size: 512  #depends on the amount of GPU mem available
+  max_duration: "5ep"
+  eval_interval: "1ep"  # Evaluate every 5k batches
+  global_train_batch_size: 512
+  save_overwrite: False
+  autoresume: True
+  reset_time: False
+
+loggers:
+  wandb:
+    project: "Hnet Angiosperms"

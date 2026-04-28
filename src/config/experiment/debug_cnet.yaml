@@ -1,7 +1,7 @@
 # @package _global_
 # let the experiment node modify configs globally
 defaults:
-  - override /model: cnet_small
+  - override /model: cnet_tiny_multistage
   - override /trainer: fixed_batch
   #- override /loggers: wandb
 
@@ -14,10 +14,10 @@ optimizer:
   lr: 5e-4
 
 trainer:
-  device_train_microbatch_size: 32  #depends on the amount of GPU mem available
+  device_train_microbatch_size: 128  #depends on the amount of GPU mem available
   max_duration: "15ba"
   eval_interval: "20ba"  # Evaluate every 5k batches
-  global_train_batch_size: 32
+  global_train_batch_size: 128
   save_overwrite: True
   autoresume: False
   reset_time: True
