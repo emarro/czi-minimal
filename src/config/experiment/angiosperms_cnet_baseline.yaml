@@ -1,15 +1,16 @@
 # @package _global_
 # let the experiment node modify configs globally
 defaults:
-  - override /model: cnet_small_crf
+  - override /model: cnet_small_baseline
   - override /trainer: fixed_batch
   - override /loggers: wandb
 
 model:
   mlm: True
   tokenizer: "dna"
+  default_target_ratio: null
 
-task_name: "angiosperms_cnet"
+task_name: "angiosperms_baseline"
 
 optimizer:
   lr: 5e-4

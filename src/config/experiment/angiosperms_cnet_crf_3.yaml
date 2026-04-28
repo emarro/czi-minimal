@@ -8,6 +8,7 @@ defaults:
 model:
   mlm: True
   tokenizer: "dna"
+  default_target_ratio: 3
 
 task_name: "angiosperms_cnet"
 

@@ -7,7 +7,9 @@ defaults:
 
 model:
   mlm: True
+  selection: "mlp"
   tokenizer: "dna"
+  default_target_ratio: 5
 
 task_name: "angiosperms_cnet"
 
@@ -17,8 +19,8 @@ dataset:
   eval_interval: "2000ba"
 
 trainer:
-  device_train_microbatch_size: 128  #depends on the amount of GPU mem available
-  max_duration: "5ep"
+  device_train_microbatch_size: 256  #depends on the amount of GPU mem available
+  max_duration: "10ep"
   eval_interval: "1ep"  # Evaluate every 5k batches
   global_train_batch_size: 2048
   save_overwrite: False
